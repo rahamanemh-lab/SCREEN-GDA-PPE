@@ -15,6 +15,22 @@ from requests.adapters import HTTPAdapter, Retry
 
 # ------------------ Config par défaut ------------------
 DEFAULT_TEMPLATE_PATH = Path("test.json")
+
+DEFAULT_TEMPLATE = {
+    "first_name": "",
+    "last_name": "",
+    "birth_date": "",
+    "nationality": "",
+    "profession": "",
+    "email": "",
+    "phone_number": "",
+    "birth_city": "",
+    "birth_country": "",
+    "birth_department": ""
+}
+
+
+
 DEFAULT_REGISTER_PATH = Path("Registrenationaldesgels.json")
 
 N_TOTAL_DEFAULT = 20
@@ -747,32 +763,41 @@ with tab_gen:
     st.subheader("Source des clients")
     mode = st.radio("Choisis une source", ["Générer (moitié POS/NEG)", "Importer CSV", "Importer JSONL"])
 
+    # Résolution du template SEULEMENT maintenant
+    template = None
+    if tmpl_file is not None:
+        template = json.load(tmpl_file)
+    elif use_local_files and DEFAULT_TEMPLATE_PATH.exists():
+        template = json.loads(DEFAULT_TEMPLATE_PATH.read_text(encoding="utf-8"))
+    else:
+        # aucun fichier fourni → on utilise un gabarit en mémoire
+        template = DEFAULT_TEMPLATE
+
     if mode == "Générer (moitié POS/NEG)":
-        st.info("Les clients générés gardent EXACTEMENT les mêmes clés que ton test.json.")
         if st.button("Générer maintenant"):
-            random.seed(42)
-            N_POS = n_total // 2
-            N_NEG = n_total - N_POS
+            # tu peux utiliser 'template' sans uploader quoi que ce soit
             personnes = [e for e in entries if e["nature"] == "Personne physique" and e["display_name"]]
             pool = personnes or entries
             gen = []
+            N_POS = n_total // 2
+            N_NEG = n_total - N_POS
             for _ in range(N_POS): gen.append(make_pos_record(template, random.choice(pool)))
             for _ in range(N_NEG): gen.append(make_neg_record(template))
             for i, r in enumerate(gen, start=1): r["_client_id"] = f"C{i:03d}"
             st.session_state["records"] = gen
             st.success(f"{len(gen)} dossiers générés.")
+
     elif mode == "Importer CSV":
         csv_up = st.file_uploader("Importer un CSV (mêmes clés que test.json)", type=["csv"])
         if csv_up is not None:
             df_in = pd.read_csv(csv_up, dtype=str).fillna("")
             st.session_state["records"] = df_in.to_dict(orient="records")
             st.success(f"{len(st.session_state['records'])} dossiers importés.")
-    else:
-        jsonl_up = st.file_uploader("Importer un JSONL (1 objet JSON par ligne)", type=["jsonl","json","txt"])
+
+    else:  # Importer JSONL
+        jsonl_up = st.file_uploader("Importer un JSONL", type=["jsonl","json","txt"])
         if jsonl_up is not None:
-            recs = []
-            for line in jsonl_up.read().decode("utf-8").splitlines():
-                if line.strip(): recs.append(json.loads(line))
+            recs = [json.loads(line) for line in jsonl_up.read().decode("utf-8").splitlines() if line.strip()]
             st.session_state["records"] = recs
             st.success(f"{len(recs)} dossiers importés.")
 
