@@ -14,7 +14,7 @@ import requests
 from requests.adapters import HTTPAdapter, Retry
 
 # ------------------ Config par défaut ------------------
-DEFAULT_TEMPLATE_PATH = Path("test.json")
+# DEFAULT_TEMPLATE_PATH = Path("test.json")
 
 DEFAULT_TEMPLATE = {
     "first_name": "",
@@ -513,7 +513,12 @@ def screen_records(records: List[Dict[str,Any]], entries: List[Dict[str,Any]], s
 
         dob_iso = to_iso_birth(rec.get("birth_date",""))
         nat_client = rec.get("nationality","")
-        birth_place_client = rec.get("birth_place","")
+        # Concat du lieu de naissance côté client (aligné avec le registre)
+        birth_place_client = " ".join([
+            rec.get("birth_city","") or "",
+            rec.get("birth_department","") or "",
+            rec.get("birth_country","") or "",
+            ]).strip()
 
         for m in matches:
             matched_norm, score_name = m[0], m[1]
@@ -708,13 +713,13 @@ reg_date_pub = ""
 
 
 # Charger template
-if tmpl_file is not None:
-    template = json.load(tmpl_file)
-elif use_local_files and DEFAULT_TEMPLATE_PATH.exists():
-    template = json.loads(DEFAULT_TEMPLATE_PATH.read_text(encoding="utf-8"))
-else:
-    st.error("Charge un test.json ou coche l'option 'Utiliser les fichiers locaux'.")
-    st.stop()
+# if tmpl_file is not None:
+#     template = json.load(tmpl_file)
+# elif use_local_files and DEFAULT_TEMPLATE_PATH.exists():
+#     template = json.loads(DEFAULT_TEMPLATE_PATH.read_text(encoding="utf-8"))
+# else:
+#     st.error("Charge un test.json ou coche l'option 'Utiliser les fichiers locaux'.")
+#     st.stop()
 
 # Charger registre
 reg_json = None
@@ -767,8 +772,8 @@ with tab_gen:
     template = None
     if tmpl_file is not None:
         template = json.load(tmpl_file)
-    elif use_local_files and DEFAULT_TEMPLATE_PATH.exists():
-        template = json.loads(DEFAULT_TEMPLATE_PATH.read_text(encoding="utf-8"))
+    # elif use_local_files and DEFAULT_TEMPLATE_PATH.exists():
+    #     template = json.loads(DEFAULT_TEMPLATE_PATH.read_text(encoding="utf-8"))
     else:
         # aucun fichier fourni → on utilise un gabarit en mémoire
         template = DEFAULT_TEMPLATE
