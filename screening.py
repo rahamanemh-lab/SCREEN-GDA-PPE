@@ -842,6 +842,28 @@ with tab_res:
             st.session_state["results_df"] = df
             st.success("Screening terminé.")
 
+
+    # --- Nouvelle barre de recherche ---
+    st.markdown("### 🔎 Recherche rapide d’un client")
+    search_name = st.text_input("Entrez un nom/prénom à vérifier :")
+    if search_name.strip():
+        rec = {
+            "first_name": search_name.split()[0],
+            "last_name": " ".join(search_name.split()[1:]) if len(search_name.split()) > 1 else "",
+            "birth_date": "",
+            "nationality": "",
+            "profession": ""
+        }
+        # screening sur un seul enregistrement
+        df_single = screen_records([rec], entries, block_th, review_th)
+        st.dataframe(df_single, use_container_width=True)
+        decision = df_single.iloc[0]["decision"]
+        reason = df_single.iloc[0]["decision_reason"]
+        alert_type = df_single.iloc[0]["alert_type"]
+        st.info(f"Résultat : **{decision}** — {reason} ({alert_type})")
+    # ----------------------------------
+
+    
     if "results_df" in st.session_state:
         df = st.session_state["results_df"]
         # KPIs
