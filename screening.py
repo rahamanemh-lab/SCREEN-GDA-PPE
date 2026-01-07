@@ -261,7 +261,7 @@ def fetch_register_latest_json() -> Dict[str, Any]:
     """
     url = f"{API_BASE}/derniere-publication-flux-json"
     sess = _requests_session()
-    r = sess.get(url, timeout=30)
+    r = sess.get(url, timeout=60)
     r.raise_for_status()
     return r.json()
 
