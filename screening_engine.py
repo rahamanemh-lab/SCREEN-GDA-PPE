@@ -445,13 +445,6 @@ def _sanctions_norm(text: str) -> str:
     return "".join(c for c in text if not unicodedata.combining(c))
 
 
-# Alias utilisé par le moteur GDA/PPE
-def norm(text: str) -> str:
-    if not text:
-        return ""
-    return _sanctions_norm(text)
-
-
 def _get_fatf_urls() -> Tuple[str, str, str]:
     """Détecte dynamiquement les URLs de la dernière plénière FATF publiée."""
     now = datetime.now()
@@ -598,10 +591,26 @@ class SanctionsLoader:
         if not nationality or not self.risk_db:
             return None
         nat_norm = _sanctions_norm(nationality)
+        nat_tokens = set(nat_norm.split())
+
         for key, info in self.risk_db.items():
             for v in info["variations"]:
                 v_norm = _sanctions_norm(v)
-                if v_norm and (v_norm in nat_norm or nat_norm in v_norm):
+                if not v_norm:
+                    continue
+                v_tokens = set(v_norm.split())
+
+                # Match exact sur la saisie complète
+                if nat_norm == v_norm:
+                    matched = True
+                # La variation est un mot seul → doit correspondre exactement à un token de la saisie
+                elif len(v_tokens) == 1:
+                    matched = v_norm in nat_tokens
+                # La variation est multi-mots → la saisie doit la contenir exactement
+                else:
+                    matched = v_norm in nat_norm
+
+                if matched:
                     return {**{k: info[k] for k in ("label","iso2","risk_level","action","source","rationale",
                                                      "in_fatf_black","in_fatf_grey","in_dgtresor")},
                             "country_key": key,
@@ -646,6 +655,8 @@ def get_sanctions_loader() -> SanctionsLoader:
 # ════════════════════════════════════════════════════════════════════════════════
 
 
+def norm(text: str) -> str:
+    """Normalisation utilisée par le moteur GDA/PPE."""
     if not text:
         return ""
     text = str(text).lower()
