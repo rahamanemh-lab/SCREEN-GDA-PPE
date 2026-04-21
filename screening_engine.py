@@ -445,6 +445,13 @@ def _sanctions_norm(text: str) -> str:
     return "".join(c for c in text if not unicodedata.combining(c))
 
 
+# Alias utilisé par le moteur GDA/PPE
+def norm(text: str) -> str:
+    if not text:
+        return ""
+    return _sanctions_norm(text)
+
+
 def _get_fatf_urls() -> Tuple[str, str, str]:
     """Détecte dynamiquement les URLs de la dernière plénière FATF publiée."""
     now = datetime.now()
