@@ -31,6 +31,9 @@ if 'db' not in st.session_state:
     st.session_state.db = Database()
 if 'screening_engine' not in st.session_state:
     st.session_state.screening_engine = ScreeningEngine()
+if 'sanctions_loader' not in st.session_state:
+    from screening_engine import get_sanctions_loader
+    st.session_state.sanctions_loader = get_sanctions_loader()
 if 'step' not in st.session_state:
     st.session_state.step = 1
 if 'form_data' not in st.session_state:
@@ -301,7 +304,7 @@ def render_gda_details(details: dict):
     motifs        = details.get('motifs') or '—'
     source        = details.get('source', 'Inconnue')
 
-    with st.expander("📋 Détails complets — Registre GDA (DG Trésor)", expanded=True):
+    with st.expander("Détails complets — Registre GDA (DG Trésor)", expanded=True):
         st.markdown(f"""
         <div class="gda-detail-box">
             <table>
@@ -439,7 +442,7 @@ def render_subscription_form():
                     ddn     = matched_person_details.get('date_naissance') or '—'
                     nom_aff = f"{matched_person_details.get('prenom_complet', matched_person_details.get('prenom', ''))} {matched_person_details.get('nom', '')}".strip()
 
-                    with st.expander("📋 Détails — Registre GDA (DG Trésor)", expanded=True):
+                    with st.expander("Détails — Registre GDA (DG Trésor)", expanded=True):
                         st.markdown(f"""
                         <div class="gda-detail-box">
                             <table>
@@ -869,7 +872,44 @@ def main():
         """, unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("### 📋 REGISTRE GDA")
+        st.markdown("### 🌍 LISTES SANCTIONS (Live)")
+
+        loader = st.session_state.get("sanctions_loader")
+        if loader:
+            status = loader.get_status_info()
+            is_stale = status.get("is_stale", True)
+            dgt_status = status.get("dgtresor_status", "—")
+            fatf_status = status.get("fatf_status", "—")
+
+            # Couleur selon fraîcheur des données
+            color_dgt  = "#10b981" if "Live" in dgt_status  else "#f59e0b"
+            color_fatf = "#10b981" if "Live" in fatf_status else "#f59e0b"
+
+            st.markdown(f"""
+            <div class="api-status" style="border-left: 3px solid {'#10b981' if not is_stale else '#f59e0b'};">
+                <div style="font-size:0.82rem;">
+                    🇫🇷 DG Trésor <span style="color:{color_dgt};">{dgt_status}</span><br>
+                    &nbsp;&nbsp;→ {status['dgtresor_count']} pays sous sanctions<br>
+                    🌐 FATF <span style="color:{color_fatf};">{fatf_status}</span><br>
+                    &nbsp;&nbsp;→ 🔴 {status['fatf_black_count']} liste noire<br>
+                    &nbsp;&nbsp;→ 🟡 {status['fatf_grey_count']} liste grise<br>
+                    <strong>Total : {status['total_risk_countries']} pays à risque</strong>
+                </div>
+                <div class="api-status-date">
+                    📅 Chargé : {status['last_loaded']}<br>
+                    🔄 Prochain : {status['next_reload']}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("🔄 Recharger sanctions", use_container_width=True, key="reload_sanctions"):
+                with st.spinner("Rechargement DG Trésor + FATF…"):
+                    loader.force_reload()
+                    st.session_state.sanctions_loader = loader
+                st.success("✅ Listes de sanctions rechargées")
+                st.rerun()
+        else:
+            st.error("❌ Loader non initialisé")
 
         if st.session_state.screening_engine.is_ready():
             nb_entries = len(st.session_state.screening_engine.entries)
