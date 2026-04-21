@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Moteur de screening GDA/PPE
-Source primaire  : API officielle France (DG Trésor)
-Source de repli  : API officielle Monaco
-Bascule automatique si France indisponible après timeout
+Moteur de screening GDA/PPE + Chargement dynamique des sanctions (DG Trésor / FATF)
+
+Sources GDA :
+  - API France (DG Trésor) — source primaire
+  - API Monaco               — source de repli automatique
+
+Sources sanctions pays :
+  - DG Trésor sanctions géographiques (lien permanent, scraping HTML)
+  - FATF liste noire + liste grise (URL auto-détectée selon calendrier des plénières)
+  Cache TTL 24h avec fallback statique.
 """
 
 import requests
 import unicodedata
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple, Optional
 from rapidfuzz import fuzz, process
+from bs4 import BeautifulSoup
 
 # ── API FRANCE (source primaire) ────────────────────────────────────────────
 # Endpoint correct : "flux-json" (et non "fichier-json")
@@ -305,26 +313,332 @@ SENSITIVE_NATIONALITIES = {
 def get_nationality_risk(nationality: str) -> Optional[Dict[str, Any]]:
     """
     Retourne les infos de risque pour une nationalité donnée.
-    Ne bloque PAS — génère une alerte à afficher tout au long du parcours.
+    Délègue au SanctionsLoader intégré (DG Trésor + FATF, cache 24h).
+    Ne bloque PAS — génère une alerte non-bloquante.
     """
-    if not nationality:
-        return None
-    nat_norm = norm(nationality)
-    for country_key, info in SENSITIVE_NATIONALITIES.items():
-        for variation in info["variations"]:
-            if norm(variation) in nat_norm or nat_norm in norm(variation):
-                return {
-                    "country_key": country_key,
-                    "label": info["label"],
-                    "risk_level": info["risk_level"],
-                    "action": info["action"],
-                    "source": info["source"],
-                    "rationale": info["rationale"],
-                    "fatf_date": info.get("fatf_date", ""),
-                }
-    return None
+    return get_sanctions_loader().get_nationality_risk(nationality)
 
-def norm(text: str) -> str:
+
+# ════════════════════════════════════════════════════════════════════════════════
+# SECTION 1 — LISTES DE SANCTIONS DYNAMIQUES (DG Trésor + FATF)
+# Chargement live au démarrage, cache TTL 24h, fallback statique intégré
+# ════════════════════════════════════════════════════════════════════════════════
+
+_SANCTIONS_TIMEOUT = 20
+_SANCTIONS_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (compatible; ScreeningApp/4.0; Compliance)',
+    'Accept': 'text/html,application/xhtml+xml',
+    'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+}
+
+# ── URL DG Trésor (lien permanent, toujours à jour) ──────────────────────────
+_DGTRESOR_SANCTIONS_URL = "https://www.tresor.economie.gouv.fr/services-aux-entreprises/sanctions-economiques"
+
+# ── FATF — base URL + calendrier des plénières (fév / juin / oct) ────────────
+_FATF_BASE   = "https://www.fatf-gafi.org/en/publications/High-risk-and-other-monitored-jurisdictions"
+_FATF_PLENARIES = [(2, "february"), (6, "june"), (10, "october")]
+
+# ── Référentiel pays : clé → { label, iso2, variations } ─────────────────────
+_COUNTRY_VARIATIONS: Dict[str, Dict] = {
+    "russie":           {"label": "Russie",                    "iso2": "RU", "variations": ["russe", "russia", "russian", "russie"]},
+    "bielorussie":      {"label": "Biélorussie",               "iso2": "BY", "variations": ["bielorusse", "belarus", "belarusian", "biélorussie", "bielorussie"]},
+    "coree_nord":       {"label": "Corée du Nord (RPDC)",      "iso2": "KP", "variations": ["nord-coréen", "nord-coréenne", "north korean", "coree du nord", "corée du nord", "dprk", "rpdc", "north korea"]},
+    "iran":             {"label": "Iran",                      "iso2": "IR", "variations": ["iranien", "iranienne", "iran", "iranian"]},
+    "syrie":            {"label": "Syrie",                     "iso2": "SY", "variations": ["syrien", "syrienne", "syria", "syrian", "syrie"]},
+    "myanmar":          {"label": "Myanmar (Birmanie)",        "iso2": "MM", "variations": ["birman", "birmane", "myanmar", "burmese", "birmanie"]},
+    "venezuela":        {"label": "Venezuela",                 "iso2": "VE", "variations": ["vénézuélien", "vénézuélienne", "venezuelan", "venezuela"]},
+    "zimbabwe":         {"label": "Zimbabwe",                  "iso2": "ZW", "variations": ["zimbabwéen", "zimbabwéenne", "zimbabwean", "zimbabwe"]},
+    "nicaragua":        {"label": "Nicaragua",                 "iso2": "NI", "variations": ["nicaraguayen", "nicaraguayenne", "nicaraguan", "nicaragua"]},
+    "soudan":           {"label": "Soudan",                    "iso2": "SD", "variations": ["soudanais", "soudanaise", "sudanese", "soudan", "sudan"]},
+    "soudan_sud":       {"label": "Soudan du Sud",             "iso2": "SS", "variations": ["sud-soudanais", "south sudanese", "soudan du sud", "south sudan"]},
+    "yemen":            {"label": "Yémen",                     "iso2": "YE", "variations": ["yéménite", "yemeni", "yemen", "yémen"]},
+    "libye":            {"label": "Libye",                     "iso2": "LY", "variations": ["libyen", "libyenne", "libyan", "libya", "libye"]},
+    "somalie":          {"label": "Somalie",                   "iso2": "SO", "variations": ["somalien", "somalienne", "somali", "somalian", "somalie"]},
+    "rca":              {"label": "République centrafricaine", "iso2": "CF", "variations": ["centrafricain", "centrafricaine", "central african", "rca", "republique centrafricaine"]},
+    "rdc":              {"label": "Rép. dém. du Congo",        "iso2": "CD", "variations": ["congolais", "congolaise", "congolese", "rdc", "rd congo", "republique democratique du congo"]},
+    "mali":             {"label": "Mali",                      "iso2": "ML", "variations": ["malien", "malienne", "malian", "mali"]},
+    "haiti":            {"label": "Haïti",                     "iso2": "HT", "variations": ["haïtien", "haïtienne", "haitian", "haiti", "haïti"]},
+    "liban":            {"label": "Liban",                     "iso2": "LB", "variations": ["libanais", "libanaise", "lebanese", "lebanon", "liban"]},
+    "irak":             {"label": "Irak",                      "iso2": "IQ", "variations": ["irakien", "irakienne", "iraqi", "irak", "iraq"]},
+    "burundi":          {"label": "Burundi",                   "iso2": "BI", "variations": ["burundais", "burundaise", "burundian", "burundi"]},
+    "guinee":           {"label": "Guinée",                    "iso2": "GN", "variations": ["guinéen", "guinéenne", "guinean", "guinee", "guinée"]},
+    "guinee_bissau":    {"label": "Guinée-Bissau",             "iso2": "GW", "variations": ["bissau-guinéen", "guinea-bissau", "guinee-bissau"]},
+    "niger":            {"label": "Niger",                     "iso2": "NE", "variations": ["nigérien", "nigérienne", "nigerien", "niger"]},
+    "moldavie":         {"label": "Moldavie",                  "iso2": "MD", "variations": ["moldave", "moldovan", "moldova", "moldavie"]},
+    "tunisie":          {"label": "Tunisie",                   "iso2": "TN", "variations": ["tunisien", "tunisienne", "tunisian", "tunisie", "tunisia"]},
+    "turquie":          {"label": "Turquie",                   "iso2": "TR", "variations": ["turc", "turque", "turkish", "turquie", "turkey"]},
+    "guatemala":        {"label": "Guatemala",                 "iso2": "GT", "variations": ["guatémaltèque", "guatemalan", "guatemala"]},
+    "algerie":          {"label": "Algérie",                   "iso2": "DZ", "variations": ["algérien", "algérienne", "algerian", "algerie", "algérie", "algeria"]},
+    "angola":           {"label": "Angola",                    "iso2": "AO", "variations": ["angolais", "angolaise", "angolan", "angola"]},
+    "cote_ivoire":      {"label": "Côte d'Ivoire",             "iso2": "CI", "variations": ["ivoirien", "ivoirienne", "ivorian", "cote d'ivoire", "côte d'ivoire", "ivory coast"]},
+    "kenya":            {"label": "Kenya",                     "iso2": "KE", "variations": ["kenyan", "kenyane", "kenya"]},
+    "laos":             {"label": "Laos",                      "iso2": "LA", "variations": ["laotien", "laotienne", "lao", "laos"]},
+    "nepal":            {"label": "Népal",                     "iso2": "NP", "variations": ["népalais", "népalaise", "nepalese", "nepal", "népal"]},
+    "cameroun":         {"label": "Cameroun",                  "iso2": "CM", "variations": ["camerounais", "camerounaise", "cameroonian", "cameroun", "cameroon"]},
+    "philippines":      {"label": "Philippines",               "iso2": "PH", "variations": ["philippin", "philippine", "filipino", "filipina", "philippines"]},
+    "senegal":          {"label": "Sénégal",                   "iso2": "SN", "variations": ["sénégalais", "sénégalaise", "senegalese", "senegal", "sénégal"]},
+    "vietnam":          {"label": "Vietnam",                   "iso2": "VN", "variations": ["vietnamien", "vietnamienne", "vietnamese", "vietnam", "viet nam"]},
+    "namibie":          {"label": "Namibie",                   "iso2": "NA", "variations": ["namibien", "namibienne", "namibian", "namibie", "namibia"]},
+    "bolivie":          {"label": "Bolivie",                   "iso2": "BO", "variations": ["bolivien", "bolivienne", "bolivian", "bolivie", "bolivia"]},
+    "iles_vierges_brit":{"label": "Îles Vierges brit.",        "iso2": "VG", "variations": ["british virgin islands", "iles vierges britanniques", "bvi"]},
+    "mozambique":       {"label": "Mozambique",                "iso2": "MZ", "variations": ["mozambicain", "mozambicaine", "mozambican", "mozambique"]},
+    "bulgarie":         {"label": "Bulgarie",                  "iso2": "BG", "variations": ["bulgare", "bulgarian", "bulgarie", "bulgaria"]},
+    "mongolie":         {"label": "Mongolie",                  "iso2": "MN", "variations": ["mongol", "mongole", "mongolian", "mongolie", "mongolia"]},
+    "koweit":           {"label": "Koweït",                    "iso2": "KW", "variations": ["koweïtien", "koweïtienne", "kuwaiti", "koweit", "koweït", "kuwait"]},
+    "papouasie":        {"label": "Papouasie-Nouvelle-Guinée", "iso2": "PG", "variations": ["papouasien", "papouasienne", "papua new guinea", "papouasie", "png"]},
+}
+
+# ── Fallback statique FATF — plénière février 2026 ────────────────────────────
+_FATF_STATIC = {
+    "black": ["KP", "IR", "MM"],
+    "grey":  ["DZ","AO","BO","BG","CM","CI","CD","HT","KE","KW",
+               "LA","LB","LY","MN","NP","NI","PG","SN","SO","SS",
+               "SY","TR","VE","VN","YE","VG","NE"],
+}
+
+# ── Fallback statique DG Trésor — scrappé le 21/04/2026 ──────────────────────
+_DGTRESOR_STATIC = ["BY","BI","CD","KP","GT","GW","GN","HT","IR","IQ",
+                    "LB","LY","ML","MD","MM","NI","NE","CF","RU","SO",
+                    "SD","SS","SY","TN","TR","VE","YE","ZW"]
+
+# ── Table nom DG Trésor → ISO2 ────────────────────────────────────────────────
+_DGTRESOR_NAME_TO_ISO2 = {
+    "biélorussie":"BY","burundi":"BI","congo (république démocratique du)":"CD",
+    "corée du nord":"KP","guatemala":"GT","guinée-bissau":"GW","guinée":"GN",
+    "haïti":"HT","iran":"IR","irak":"IQ","liban":"LB","libye":"LY",
+    "mali":"ML","moldavie":"MD","myanmar (ex-birmanie)":"MM","nicaragua":"NI",
+    "niger":"NE","république centrafricaine":"CF","russie":"RU","somalie":"SO",
+    "soudan":"SD","soudan du sud":"SS","syrie":"SY","tunisie":"TN",
+    "turquie":"TR","venezuela":"VE","yémen":"YE","zimbabwe":"ZW",
+}
+
+# ── Table nom FATF → ISO2 ─────────────────────────────────────────────────────
+_FATF_NAME_TO_ISO2 = {
+    "democratic people's republic of korea":"KP","north korea":"KP","dprk":"KP",
+    "iran":"IR","myanmar":"MM","burma":"MM",
+    "algeria":"DZ","angola":"AO","bolivia":"BO","bulgaria":"BG",
+    "cameroon":"CM","côte d'ivoire":"CI","cote d'ivoire":"CI","ivory coast":"CI",
+    "democratic republic of the congo":"CD","drc":"CD",
+    "haiti":"HT","kenya":"KE","kuwait":"KW",
+    "laos":"LA","lao pdr":"LA","lao people's democratic republic":"LA",
+    "lebanon":"LB","libya":"LY","mongolia":"MN",
+    "nepal":"NP","nicaragua":"NI","niger":"NE",
+    "papua new guinea":"PG","png":"PG",
+    "senegal":"SN","somalia":"SO","south sudan":"SS",
+    "syria":"SY","turkey":"TR",
+    "venezuela":"VE","vietnam":"VN","yemen":"YE",
+    "british virgin islands":"VG",
+}
+
+# ── Métadonnées par niveau de risque ─────────────────────────────────────────
+_RISK_METADATA = {
+    "LISTE_NOIRE":       {"action":"CONTRE_MESURES",    "source_label":"FATF – Liste noire (appel à l'action)",             "rationale":"Défaillances stratégiques graves LBC/FT/FP. Contre-mesures obligatoires."},
+    "SANCTIONS_UE":      {"action":"DDR_RENFORCEE",     "source_label":"DG Trésor / Règlement UE – Sanctions géographiques","rationale":"Pays soumis à un régime de sanctions économiques et financières UE/ONU en vigueur sur le territoire français."},
+    "LISTE_GRISE":       {"action":"VIGILANCE_RENFORCEE","source_label":"FATF – Liste grise (surveillance renforcée)",      "rationale":"Défaillances stratégiques LBC/FT. Travaille avec le FATF sur un plan d'action correctif."},
+    "SANCTIONS_ET_GRISE":{"action":"DDR_RENFORCEE",     "source_label":"DG Trésor + FATF liste grise",                     "rationale":"Pays sous sanctions UE/ONU ET sous surveillance renforcée FATF."},
+}
+
+
+def _sanctions_norm(text: str) -> str:
+    text = str(text).lower()
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in text if not unicodedata.combining(c))
+
+
+def _get_fatf_urls() -> Tuple[str, str, str]:
+    """Détecte dynamiquement les URLs de la dernière plénière FATF publiée."""
+    now = datetime.now()
+    candidates = []
+    for year in range(now.year, now.year - 2, -1):
+        for month, month_name in reversed(_FATF_PLENARIES):
+            if year == now.year and month > now.month:
+                continue
+            candidates.append((year, month, month_name))
+
+    for year, month, month_name in candidates:
+        black_url = f"{_FATF_BASE}/Call-for-action-{month_name}-{year}.html"
+        grey_url  = f"{_FATF_BASE}/increased-monitoring-{month_name}-{year}.html"
+        label     = f"{month_name.capitalize()} {year}"
+        try:
+            r = requests.head(black_url, timeout=8, headers=_SANCTIONS_HEADERS, allow_redirects=True)
+            if r.status_code == 200:
+                print(f"   ✅ FATF URLs détectées : {label}")
+                return black_url, grey_url, label
+        except Exception:
+            pass
+
+    print("   ⚠️  FATF URL auto-détection échouée — fallback février 2026")
+    return (f"{_FATF_BASE}/Call-for-action-february-2026.html",
+            f"{_FATF_BASE}/increased-monitoring-february-2026.html",
+            "February 2026 (fallback)")
+
+
+def _scrape_dgtresor() -> List[str]:
+    try:
+        resp = requests.get(_DGTRESOR_SANCTIONS_URL, timeout=_SANCTIONS_TIMEOUT, headers=_SANCTIONS_HEADERS)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        iso2_list = []
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag.get("href", "")
+            if "sanctions-economiques/" not in href:
+                continue
+            if any(x in href for x in ["regime-ue", "regime-onu", "lutte-contre", "russie-en-lien"]):
+                if "russie" in href:
+                    iso2_list.append("RU")
+                continue
+            text_norm = _sanctions_norm(a_tag.get_text(strip=True))
+            if text_norm in _DGTRESOR_NAME_TO_ISO2:
+                iso2 = _DGTRESOR_NAME_TO_ISO2[text_norm]
+                if iso2 not in iso2_list:
+                    iso2_list.append(iso2)
+        if not iso2_list:
+            print("   ⚠️  DG Trésor : aucun pays extrait — fallback statique")
+            return list(_DGTRESOR_STATIC)
+        print(f"   ✅ DG Trésor : {len(iso2_list)} pays sous sanctions")
+        return iso2_list
+    except Exception as e:
+        print(f"   ⚠️  DG Trésor scraping échoué ({e}) — fallback statique")
+        return list(_DGTRESOR_STATIC)
+
+
+def _scrape_fatf_page(url: str, list_type: str) -> List[str]:
+    try:
+        resp = requests.get(url, timeout=_SANCTIONS_TIMEOUT, headers=_SANCTIONS_HEADERS)
+        resp.raise_for_status()
+        full_text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True).lower()
+        iso2_list = [iso2 for name, iso2 in _FATF_NAME_TO_ISO2.items()
+                     if name in full_text]
+        # Dédupliquer en conservant l'ordre
+        seen = set(); iso2_list = [x for x in iso2_list if not (x in seen or seen.add(x))]
+        print(f"   {'✅' if iso2_list else '⚠️ '} FATF {list_type} : {len(iso2_list)} pays")
+        return iso2_list
+    except Exception as e:
+        print(f"   ⚠️  FATF {list_type} scraping échoué ({e})")
+        return []
+
+
+def _build_risk_db(dgtresor: List[str], black: List[str], grey: List[str]) -> Dict:
+    risk_db = {}
+    for key, info in _COUNTRY_VARIATIONS.items():
+        iso2 = info.get("iso2", "")
+        in_black = iso2 in black
+        in_dgt   = iso2 in dgtresor
+        in_grey  = iso2 in grey
+        if not (in_black or in_dgt or in_grey):
+            continue
+        if in_black:
+            level = "LISTE_NOIRE"
+        elif in_dgt and in_grey:
+            level = "SANCTIONS_ET_GRISE"
+        elif in_dgt:
+            level = "SANCTIONS_UE"
+        else:
+            level = "LISTE_GRISE"
+        meta = _RISK_METADATA[level]
+        risk_db[key] = {**info, "risk_level": level, "action": meta["action"],
+                        "source": meta["source_label"], "rationale": meta["rationale"],
+                        "in_fatf_black": in_black, "in_fatf_grey": in_grey, "in_dgtresor": in_dgt}
+    return risk_db
+
+
+class SanctionsLoader:
+    """Charge et met en cache les listes de pays à risque (DG Trésor + FATF). TTL 24h."""
+    TTL_HOURS = 24
+
+    def __init__(self):
+        self.risk_db: Dict         = {}
+        self.last_loaded: Optional[datetime] = None
+        self.fatf_label: str       = ""
+        self.dgtresor_count: int   = 0
+        self.fatf_black_count: int = 0
+        self.fatf_grey_count: int  = 0
+        self.source_status: Dict   = {}
+
+    def is_stale(self) -> bool:
+        return not self.risk_db or self.last_loaded is None or \
+               datetime.now() - self.last_loaded > timedelta(hours=self.TTL_HOURS)
+
+    def load(self, force: bool = False) -> bool:
+        if not force and not self.is_stale():
+            return True
+        print("\n" + "="*60)
+        print("🔄 CHARGEMENT LISTES DE SANCTIONS (DG Trésor + FATF)")
+        print("="*60)
+
+        print("\n🇫🇷 DG Trésor — Sanctions géographiques…")
+        dgtresor = _scrape_dgtresor()
+        self.dgtresor_count = len(dgtresor)
+        self.source_status["dgtresor"] = "✅ Live" if dgtresor != _DGTRESOR_STATIC else "⚠️ Fallback"
+
+        print("\n🌐 FATF — Détection + scraping…")
+        black_url, grey_url, self.fatf_label = _get_fatf_urls()
+        black = _scrape_fatf_page(black_url, "noire") or list(_FATF_STATIC["black"])
+        grey  = _scrape_fatf_page(grey_url,  "grise") or list(_FATF_STATIC["grey"])
+        self.fatf_black_count = len(black)
+        self.fatf_grey_count  = len(grey)
+        self.source_status["fatf"] = "✅ Live" if (black != _FATF_STATIC["black"] or grey != _FATF_STATIC["grey"]) else "⚠️ Fallback"
+
+        self.risk_db = _build_risk_db(dgtresor, black, grey)
+        self.last_loaded = datetime.now()
+        print(f"\n✅ {len(self.risk_db)} pays à risque chargés — FATF : {self.fatf_label}")
+        print("="*60 + "\n")
+        return True
+
+    def get_nationality_risk(self, nationality: str) -> Optional[Dict]:
+        if self.is_stale():
+            self.load()
+        if not nationality or not self.risk_db:
+            return None
+        nat_norm = _sanctions_norm(nationality)
+        for key, info in self.risk_db.items():
+            for v in info["variations"]:
+                v_norm = _sanctions_norm(v)
+                if v_norm and (v_norm in nat_norm or nat_norm in v_norm):
+                    return {**{k: info[k] for k in ("label","iso2","risk_level","action","source","rationale",
+                                                     "in_fatf_black","in_fatf_grey","in_dgtresor")},
+                            "country_key": key,
+                            "fatf_label":  self.fatf_label,
+                            "loaded_at":   self.last_loaded.strftime("%d/%m/%Y à %H:%M") if self.last_loaded else "?"}
+        return None
+
+    def get_status_info(self) -> Dict:
+        return {
+            "last_loaded":          self.last_loaded.strftime("%d/%m/%Y à %H:%M") if self.last_loaded else "Jamais",
+            "next_reload":          (self.last_loaded + timedelta(hours=self.TTL_HOURS)).strftime("%d/%m/%Y à %H:%M") if self.last_loaded else "—",
+            "fatf_label":           self.fatf_label,
+            "dgtresor_count":       self.dgtresor_count,
+            "fatf_black_count":     self.fatf_black_count,
+            "fatf_grey_count":      self.fatf_grey_count,
+            "total_risk_countries": len(self.risk_db),
+            "dgtresor_status":      self.source_status.get("dgtresor", "—"),
+            "fatf_status":          self.source_status.get("fatf", "—"),
+            "is_stale":             self.is_stale(),
+        }
+
+    def force_reload(self) -> bool:
+        return self.load(force=True)
+
+
+# Singleton interne — accès via get_sanctions_loader()
+_sanctions_loader_instance: Optional[SanctionsLoader] = None
+
+
+def get_sanctions_loader() -> SanctionsLoader:
+    global _sanctions_loader_instance
+    if _sanctions_loader_instance is None:
+        _sanctions_loader_instance = SanctionsLoader()
+        _sanctions_loader_instance.load()
+    elif _sanctions_loader_instance.is_stale():
+        _sanctions_loader_instance.load()
+    return _sanctions_loader_instance
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# SECTION 2 — MOTEUR GDA / PPE
+# ════════════════════════════════════════════════════════════════════════════════
+
+
     if not text:
         return ""
     text = str(text).lower()
@@ -404,52 +718,52 @@ class ScreeningEngine:
                 if nature != "Personne physique":
                     continue
 
-                # ── Colonnes du registre GDA (mapping exact) ────────────────
-                # Id | Régime | Type de nature | Nom | Prénom | Alias
-                # Date de naissance | Lieu de naissance | Nationalité | Titre
-                # Adresse | Passeport | Identification | Fondement juridique | Motifs
+                # ── Mapping exact du schéma JSON officiel DG Trésor ─────────
+                # Champs top-level : IdRegistre | Nature | Nom | RegistreDetail
+                # TypeChamp possibles (Personne physique) :
+                #   PRENOM | ALIAS | SEXE | DATE_DE_NAISSANCE | LIEU_DE_NAISSANCE
+                #   NATIONALITE | TITRE | ADRESSE_PP | AUTRE_IDENTITE | PASSEPORT
+                #   CRYPTOMMONNAIE | MOTIFS | FONDEMENT_JURIDIQUE | REFERENCE_UE | REFERENCE_ONU
 
-                prenoms          = []
-                nationalities    = []
-                dob              = ""
-                alias            = []
-                lieu_naissance   = ""
-                titre            = ""
-                adresse          = []
-                passeport        = []
-                identification   = []
-                fondement_jur    = str(item.get("FondementJuridique", "")).strip()
-                motifs           = str(item.get("Motifs", "")).strip()
-                regime           = str(item.get("Regime", "")).strip()
-                id_registre      = str(item.get("Id", "")).strip()
+                prenoms        = []
+                nationalities  = []
+                dob            = ""
+                alias          = []          # Alias.Alias (string)
+                lieu_naissance = ""          # LieuDeNaissance.Lieu + .Pays
+                titre          = ""          # Titre.Titre
+                adresse        = []          # Adresse.Adresse + .Pays  (TypeChamp=ADRESSE_PP)
+                passeport      = []          # Passeport.NumeroPasseport + .Commentaire
+                identification = []          # AutreIdentite.NumeroCarte + .Commentaire
+                fondement_jur  = []          # FondementJuridique.FondementJuridiqueLabel
+                ref_ue         = []          # ReferenceUe.ReferenceUe
+                ref_onu        = []          # ReferenceOnu.ReferenceOnu
+                motifs         = []          # Motifs.Motifs (string)
+                regime         = str(item.get("Regime", "")).strip()
+                id_registre    = str(item.get("IdRegistre", "")).strip()
 
                 for detail in item.get("RegistreDetail", []):
                     type_champ = detail.get("TypeChamp", "")
                     valeurs    = detail.get("Valeur") or []
 
-                    # ── Prénom ──────────────────────────────────────────────
+                    # ── PRENOM → Prenom.Prenom ───────────────────────────────
                     if type_champ == "PRENOM":
                         prenoms += [v.get("Prenom", "") for v in valeurs if v.get("Prenom")]
 
-                    # ── Alias ───────────────────────────────────────────────
+                    # ── ALIAS → Alias.Alias (+ Commentaire optionnel) ────────
                     elif type_champ == "ALIAS":
                         for v in valeurs:
-                            # La valeur alias peut être dans différentes clés
-                            a = (v.get("Alias") or v.get("Nom") or v.get("Prenom") or
-                                 v.get("NomAlias") or v.get("PrenomAlias") or "")
-                            nom_a = v.get("Nom", "")
-                            prenom_a = v.get("Prenom", "")
-                            if nom_a or prenom_a:
-                                a = f"{prenom_a} {nom_a}".strip()
+                            a = v.get("Alias", "").strip()
+                            commentaire = v.get("Commentaire", "").strip()
                             if a:
-                                alias.append(a)
+                                alias.append(f"{a} ({commentaire})" if commentaire else a)
 
-                    # ── Date de naissance ────────────────────────────────────
+                    # ── DATE_DE_NAISSANCE → Annee/Mois/Jour (+ Commentaire) ──
                     elif type_champ == "DATE_DE_NAISSANCE":
                         v = valeurs[0] if valeurs else {}
                         y = v.get("Annee", "")
                         m = v.get("Mois", "")
                         j = v.get("Jour", "")
+                        commentaire = v.get("Commentaire", "")
                         if y:
                             if m and j:
                                 dob = f"{y}-{str(m).zfill(2)}-{str(j).zfill(2)}"
@@ -457,84 +771,100 @@ class ScreeningEngine:
                                 dob = f"{y}-{str(m).zfill(2)}"
                             else:
                                 dob = str(y)
+                            if commentaire:
+                                dob += f" ({commentaire})"
 
-                    # ── Lieu de naissance ────────────────────────────────────
+                    # ── LIEU_DE_NAISSANCE → Lieu + Pays ─────────────────────
                     elif type_champ == "LIEU_DE_NAISSANCE":
                         v = valeurs[0] if valeurs else {}
-                        ville = v.get("Ville", "").strip()
-                        pays  = v.get("Pays", "").strip()
-                        if ville and pays:
-                            lieu_naissance = f"{ville} ({pays})"
-                        elif ville:
-                            lieu_naissance = ville
+                        lieu = v.get("Lieu", "").strip()   # clé exacte du schéma : "Lieu"
+                        pays = v.get("Pays", "").strip()
+                        if lieu and pays:
+                            lieu_naissance = f"{lieu} ({pays})"
+                        elif lieu:
+                            lieu_naissance = lieu
                         elif pays:
                             lieu_naissance = pays
 
-                    # ── Nationalité ──────────────────────────────────────────
+                    # ── NATIONALITE → Pays (+ Commentaire) ──────────────────
                     elif type_champ == "NATIONALITE":
-                        nationalities += [v.get("Pays", "") for v in valeurs if v.get("Pays")]
-
-                    # ── Titre ────────────────────────────────────────────────
-                    elif type_champ == "TITRE":
-                        titre = " | ".join([v.get("Titre", "") for v in valeurs if v.get("Titre")])
-
-                    # ── Adresse ──────────────────────────────────────────────
-                    elif type_champ == "ADRESSE":
                         for v in valeurs:
-                            parts = [
-                                v.get("Adresse", ""),
-                                v.get("Ville", ""),
-                                v.get("CodePostal", ""),
-                                v.get("Pays", ""),
-                            ]
+                            pays = v.get("Pays", "").strip()
+                            commentaire = v.get("Commentaire", "").strip()
+                            if pays:
+                                nationalities.append(
+                                    f"{pays} ({commentaire})" if commentaire else pays
+                                )
+
+                    # ── TITRE → Titre.Titre ──────────────────────────────────
+                    elif type_champ == "TITRE":
+                        titres = [v.get("Titre", "") for v in valeurs if v.get("Titre")]
+                        if titres:
+                            titre = " | ".join(titres)
+
+                    # ── ADRESSE_PP → Adresse + Pays ──────────────────────────
+                    elif type_champ == "ADRESSE_PP":
+                        for v in valeurs:
+                            parts = [v.get("Adresse", ""), v.get("Pays", "")]
                             addr = ", ".join(p for p in parts if p)
                             if addr:
                                 adresse.append(addr)
 
-                    # ── Passeport ────────────────────────────────────────────
+                    # ── PASSEPORT → NumeroPasseport (+ Commentaire) ──────────
                     elif type_champ == "PASSEPORT":
                         for v in valeurs:
-                            num = v.get("NumeroPasseport") or v.get("Numero") or v.get("NumPasseport") or ""
-                            pays_p = v.get("Pays", "")
+                            num = v.get("NumeroPasseport", "").strip()
+                            commentaire = v.get("Commentaire", "").strip()
                             if num:
-                                passeport.append(f"{num} ({pays_p})" if pays_p else num)
+                                passeport.append(
+                                    f"{num} ({commentaire})" if commentaire else num
+                                )
 
-                    # ── Identification (carte nationale, autres docs) ─────────
-                    elif type_champ in ("IDENTIFICATION", "NUMERO_IDENTIFICATION",
-                                        "CARTE_IDENTITE", "DOCUMENT_IDENTITE"):
+                    # ── AUTRE_IDENTITE → NumeroCarte (+ Commentaire) ─────────
+                    elif type_champ == "AUTRE_IDENTITE":
                         for v in valeurs:
-                            num = (v.get("Numero") or v.get("NumeroIdentification") or
-                                   v.get("NumeroDocument") or "")
-                            type_doc = v.get("TypeDocument", "") or v.get("Type", "")
-                            pays_i = v.get("Pays", "")
+                            num = v.get("NumeroCarte", "").strip()
+                            commentaire = v.get("Commentaire", "").strip()
                             if num:
-                                label_id = f"{type_doc} {num}".strip()
-                                if pays_i:
-                                    label_id += f" ({pays_i})"
-                                identification.append(label_id)
+                                identification.append(
+                                    f"{num} ({commentaire})" if commentaire else num
+                                )
 
-                    # ── Fondement juridique ──────────────────────────────────
-                    elif type_champ in ("FONDEMENT_JURIDIQUE", "REFERENCE_JURIDIQUE",
-                                        "REFERENCE_UE", "REFERENCE"):
-                        refs = [v.get("FondementJuridique") or v.get("Reference") or
-                                v.get("Intitule") or v.get("Texte") or ""
-                                for v in valeurs]
-                        refs = [r for r in refs if r]
-                        if refs:
-                            fondement_jur = " | ".join(refs)
+                    # ── MOTIFS → Motifs.Motifs ───────────────────────────────
+                    elif type_champ == "MOTIFS":
+                        for v in valeurs:
+                            m_txt = v.get("Motifs", "").strip()   # clé exacte : "Motifs"
+                            if m_txt:
+                                motifs.append(m_txt)
 
-                    # ── Motifs ───────────────────────────────────────────────
-                    elif type_champ in ("MOTIFS", "MOTIF"):
-                        mots = [v.get("Motifs") or v.get("Motif") or v.get("Texte") or ""
-                                for v in valeurs]
-                        mots = [m for m in mots if m]
-                        if mots:
-                            motifs = " ".join(mots)
+                    # ── FONDEMENT_JURIDIQUE → FondementJuridiqueLabel ────────
+                    elif type_champ == "FONDEMENT_JURIDIQUE":
+                        for v in valeurs:
+                            label = v.get("FondementJuridiqueLabel", "").strip()
+                            if label:
+                                fondement_jur.append(label)
+
+                    # ── REFERENCE_UE → ReferenceUe.ReferenceUe ──────────────
+                    elif type_champ == "REFERENCE_UE":
+                        for v in valeurs:
+                            ref = v.get("ReferenceUe", "").strip()
+                            if ref:
+                                ref_ue.append(ref)
+
+                    # ── REFERENCE_ONU → ReferenceOnu.ReferenceOnu ───────────
+                    elif type_champ == "REFERENCE_ONU":
+                        for v in valeurs:
+                            ref = v.get("ReferenceOnu", "").strip()
+                            if ref:
+                                ref_onu.append(ref)
 
                 if not nom and not prenoms:
                     continue
 
-                # Une entrée par prénom (comme dans le reste du code)
+                # Consolider fondement juridique + références UE/ONU
+                fondement_complet = " | ".join(filter(None, fondement_jur + ref_ue + ref_onu))
+
+                # Une entrée par prénom
                 for prenom in (prenoms if prenoms else [""]):
                     premier = prenom.split()[0] if prenom else ""
                     self.entries.append({
@@ -557,8 +887,8 @@ class ScreeningEngine:
                         # ── Localisation ────────────────────────────────────
                         'adresse':         adresse,
                         # ── Sanctions ───────────────────────────────────────
-                        'fondement_jur':   fondement_jur,   # = "Fondement juridique"
-                        'motifs':          motifs,           # = "Motifs"
+                        'motifs':          " ".join(motifs),         # Motifs.Motifs
+                        'fondement_jur':   fondement_complet,        # FondementJuridiqueLabel + ReferenceUe + ReferenceOnu
                     })
                     count += 1
 
