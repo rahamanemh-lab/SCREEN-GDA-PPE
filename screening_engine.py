@@ -62,29 +62,267 @@ PPE_KEYWORDS = {
     "sous_préfet": ["sous-préfet", "sous-préfète", "sub-prefect"],
 }
 
+# ── Pays à risque - Structure détaillée ─────────────────────────────────────
+# Chaque pays : variations de nationalité + métadonnées de risque
+# risk_level : "LISTE_NOIRE" | "SANCTIONS_UE" | "LISTE_GRISE"
+# action : "CONTRE_MESURES" | "VIGILANCE_RENFORCEE" | "DDR_RENFORCEE"
+# source : référence réglementaire applicable
+# rationale : motif synthétique affiché dans l'alerte
+
 SENSITIVE_NATIONALITIES = {
-    # Liste officielle DG Trésor - Sanctions économiques
-    "russie": ["russe", "russia", "russian", "russie"],
-    "bielorussie": ["bielorusse", "belarus", "belarusian", "biélorussie"],
-    "coree_nord": ["nord-coréen", "nord-coréenne", "north korean", "coree du nord", "corée du nord", "dprk"],
-    "iran": ["iranien", "iranienne", "iran", "iranian"],
-    "syrie": ["syrien", "syrienne", "syria", "syrian", "syrie"],
-    "myanmar": ["birman", "birmane", "myanmar", "burmese", "birmanie"],
-    "venezuela": ["vénézuélien", "vénézuélienne", "venezuelan", "venezuela"],
-    "zimbabwe": ["zimbabwéen", "zimbabwéenne", "zimbabwean", "zimbabwe"],
-    "nicaragua": ["nicaraguayen", "nicaraguayenne", "nicaraguan", "nicaragua"],
-    "soudan": ["soudanais", "soudanaise", "sudanese", "sudan", "soudan"],
-    "yemen": ["yéménite", "yemeni", "yemen", "yémen"],
-    "libye": ["libyen", "libyenne", "libyan", "libya", "libye"],
-    "somalie": ["somalien", "somalienne", "somali", "somalian", "somalie"],
-    "rca": ["centrafricain", "centrafricaine", "central african", "république centrafricaine", "rca"],
-    "congo_rdc": ["congolais", "congolaise", "congolese", "république démocratique du congo", "rdc", "congo"],
-    "mali": ["malien", "malienne", "malian", "mali"],
-    "haiti": ["haïtien", "haïtienne", "haitian", "haiti", "haïti"],
-    "liban": ["libanais", "libanaise", "lebanese", "lebanon", "liban"],
-    # Ajout Chine pour cohérence (souvent considéré comme sensible en AML/CFT)
-    "chine": ["chinois", "chinoise", "china", "chinese", "chine"],
+    # ── LISTE NOIRE FATF (appel à contre-mesures) ───────────────────────────
+    "coree_nord": {
+        "variations": ["nord-coréen", "nord-coréenne", "north korean", "coree du nord", "corée du nord", "dprk", "rpdc"],
+        "risk_level": "LISTE_NOIRE",
+        "label": "Corée du Nord (RPDC)",
+        "action": "CONTRE_MESURES",
+        "source": "FATF – Appel à l'action (oct. 2025) | Résol. CSNU 2270",
+        "rationale": "Défaillances stratégiques graves LBC/FT/FP ; risques élevés de financement de la prolifération nucléaire.",
+        "fatf_date": "2025-10",
+    },
+    "iran": {
+        "variations": ["iranien", "iranienne", "iran", "iranian"],
+        "risk_level": "LISTE_NOIRE",
+        "label": "Iran",
+        "action": "CONTRE_MESURES",
+        "source": "FATF – Appel à l'action (oct. 2025) | DG Trésor – Sanctions nucléaires",
+        "rationale": "Plan d'action non résolu depuis 2016 ; risques de financement de prolifération. Obligations découlant des résolutions CSNU sur le nucléaire iranien.",
+        "fatf_date": "2025-10",
+    },
+    "myanmar": {
+        "variations": ["birman", "birmane", "myanmar", "burmese", "birmanie"],
+        "risk_level": "LISTE_NOIRE",
+        "label": "Myanmar (Birmanie)",
+        "action": "CONTRE_MESURES",
+        "source": "FATF – Appel à l'action (oct. 2025) | DG Trésor – Sanctions",
+        "rationale": "Absence persistante de progrès sur le plan d'action FATF ; vigilance renforcée obligatoire sur toutes les transactions.",
+        "fatf_date": "2025-10",
+    },
+
+    # ── SANCTIONS UE / DG TRÉSOR (embargo, gel d'avoirs) ───────────────────
+    "russie": {
+        "variations": ["russe", "russia", "russian", "russie"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Russie",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°833/2014 et suivants | DG Trésor – Sanctions Russie",
+        "rationale": "Embargo et sanctions économiques UE en lien avec l'agression contre l'Ukraine. Gel d'avoirs de nombreuses personnes physiques et entités.",
+        "fatf_date": "2022-03",
+    },
+    "bielorussie": {
+        "variations": ["bielorusse", "belarus", "belarusian", "biélorussie", "bielorussie"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Biélorussie",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°765/2006 et suivants | DG Trésor – Sanctions Biélorussie",
+        "rationale": "Sanctions UE liées aux violations des droits de l'Homme et au soutien à l'agression russe contre l'Ukraine.",
+        "fatf_date": "2020-06",
+    },
+    "syrie": {
+        "variations": ["syrien", "syrienne", "syria", "syrian", "syrie"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Syrie",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°36/2012 | DG Trésor – Sanctions Syrie | FATF liste grise",
+        "rationale": "Embargo et sanctions UE. Pays également sous surveillance renforcée FATF pour défaillances LBC/FT.",
+        "fatf_date": "2024-06",
+    },
+    "libye": {
+        "variations": ["libyen", "libyenne", "libyan", "libya", "libye"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Libye",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°204/2011 | DG Trésor – Sanctions Libye",
+        "rationale": "Embargo sur les armes et sanctions UE. Instabilité politique et risques élevés de blanchiment.",
+        "fatf_date": "2011-03",
+    },
+    "soudan": {
+        "variations": ["soudanais", "soudanaise", "sudanese", "sudan", "soudan"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Soudan",
+        "action": "DDR_RENFORCEE",
+        "source": "DG Trésor – Sanctions Soudan | Résol. CSNU 1556",
+        "rationale": "Sanctions internationales ; risques élevés BC/FT liés à l'instabilité et aux conflits armés.",
+        "fatf_date": "2004-07",
+    },
+    "zimbabwe": {
+        "variations": ["zimbabwéen", "zimbabwéenne", "zimbabwean", "zimbabwe"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Zimbabwe",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°314/2004 | DG Trésor – Sanctions Zimbabwe",
+        "rationale": "Sanctions UE liées à des violations des droits de l'Homme. Gel d'avoirs de personnes désignées.",
+        "fatf_date": "2004-02",
+    },
+    "nicaragua": {
+        "variations": ["nicaraguayen", "nicaraguayenne", "nicaraguan", "nicaragua"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Nicaragua",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°2022/1304 | DG Trésor – Sanctions Nicaragua",
+        "rationale": "Sanctions UE liées aux violations des droits de l'Homme et à la répression politique.",
+        "fatf_date": "2022-07",
+    },
+    "somalie": {
+        "variations": ["somalien", "somalienne", "somali", "somalian", "somalie"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "Somalie",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°356/2010 | DG Trésor – Sanctions Somalie | Résol. CSNU 1844",
+        "rationale": "Embargo et sanctions liés à la piraterie et à Al-Shabaab. Risques élevés de financement du terrorisme.",
+        "fatf_date": "2010-04",
+    },
+    "rca": {
+        "variations": ["centrafricain", "centrafricaine", "central african", "république centrafricaine", "rca"],
+        "risk_level": "SANCTIONS_UE",
+        "label": "République centrafricaine",
+        "action": "DDR_RENFORCEE",
+        "source": "Règlement UE n°224/2014 | DG Trésor – Sanctions RCA | Résol. CSNU 2127",
+        "rationale": "Embargo sur les armes et sanctions liés au conflit armé. Risques élevés BC/FT.",
+        "fatf_date": "2013-12",
+    },
+
+    # ── LISTE GRISE FATF (surveillance renforcée, fév. 2025) ────────────────
+    "congo_rdc": {
+        "variations": ["congolais", "congolaise", "congolese", "république démocratique du congo", "rdc", "rd congo"],
+        "risk_level": "LISTE_GRISE",
+        "label": "République démocratique du Congo",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (fév. 2025)",
+        "rationale": "Défaillances stratégiques LBC/FT identifiées par le FATF. Diligence renforcée obligatoire.",
+        "fatf_date": "2022-06",
+    },
+    "mali": {
+        "variations": ["malien", "malienne", "malian", "mali"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Mali",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (fév. 2025)",
+        "rationale": "Plan d'action FATF expiré avec travail restant. Défaillances sur le financement du terrorisme.",
+        "fatf_date": "2021-06",
+    },
+    "haiti": {
+        "variations": ["haïtien", "haïtienne", "haitian", "haiti", "haïti"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Haïti",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (fév. 2025)",
+        "rationale": "Défaillances stratégiques LBC/FT. Instabilité politique aggravant les risques.",
+        "fatf_date": "2020-10",
+    },
+    "liban": {
+        "variations": ["libanais", "libanaise", "lebanese", "lebanon", "liban"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Liban",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (oct. 2024)",
+        "rationale": "Inscrit sur liste grise FATF en oct. 2024 suite à défaillances LBC/FT identifiées.",
+        "fatf_date": "2024-10",
+    },
+    "venezuela": {
+        "variations": ["vénézuélien", "vénézuélienne", "venezuelan", "venezuela"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Venezuela",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (juin 2024)",
+        "rationale": "Inscrit liste grise FATF juin 2024 : risques BC liés à l'économie informelle et liens Iran/Caracas.",
+        "fatf_date": "2024-06",
+    },
+    "yemen": {
+        "variations": ["yéménite", "yemeni", "yemen", "yémen"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Yémen",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée | DG Trésor – Sanctions",
+        "rationale": "Sous surveillance FATF ; conflit armé et risques élevés de financement du terrorisme.",
+        "fatf_date": "2020-10",
+    },
+    "kenya": {
+        "variations": ["kenyan", "kenyane", "kenyan", "kenya"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Kenya",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (fév. 2024)",
+        "rationale": "Inscrit liste grise FATF fév. 2024 ; défaillances sur la supervision des risques BC/FT.",
+        "fatf_date": "2024-02",
+    },
+    "algerie": {
+        "variations": ["algérien", "algérienne", "algerian", "algerie", "algérie"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Algérie",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (oct. 2024)",
+        "rationale": "Inscrit liste grise FATF oct. 2024 ; défaillances stratégiques LBC/FT identifiées.",
+        "fatf_date": "2024-10",
+    },
+    "angola": {
+        "variations": ["angolais", "angolaise", "angolan", "angola"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Angola",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (oct. 2024)",
+        "rationale": "Inscrit liste grise FATF oct. 2024 ; lacunes en matière de supervision et poursuites BC.",
+        "fatf_date": "2024-10",
+    },
+    "cote_ivoire": {
+        "variations": ["ivoirien", "ivoirienne", "ivorian", "cote d'ivoire", "côte d'ivoire"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Côte d'Ivoire",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (oct. 2024)",
+        "rationale": "Inscrit liste grise FATF oct. 2024 malgré progrès notables post-REM 2023.",
+        "fatf_date": "2024-10",
+    },
+    "laos": {
+        "variations": ["laotien", "laotienne", "lao", "laos"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Laos (RDP Lao)",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (fév. 2025)",
+        "rationale": "Inscrit liste grise fév. 2025 ; défis persistants sur l'évaluation des risques et la supervision réglementaire.",
+        "fatf_date": "2025-02",
+    },
+    "nepal": {
+        "variations": ["népalais", "népalaise", "nepalese", "nepal", "népal"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Népal",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée (fév. 2025)",
+        "rationale": "Inscrit liste grise fév. 2025 ; défaillances stratégiques LBC/FT identifiées.",
+        "fatf_date": "2025-02",
+    },
+    "cambodge": {
+        "variations": ["cambodgien", "cambodgienne", "cambodian", "cambodge"],
+        "risk_level": "LISTE_GRISE",
+        "label": "Cambodge",
+        "action": "VIGILANCE_RENFORCEE",
+        "source": "FATF – Surveillance renforcée | DG Trésor",
+        "rationale": "Surveillance FATF pour défaillances LBC/FT ; risques BC liés aux jeux en ligne et ZES.",
+        "fatf_date": "2019-06",
+    },
 }
+
+def get_nationality_risk(nationality: str) -> Optional[Dict[str, Any]]:
+    """
+    Retourne les infos de risque pour une nationalité donnée.
+    Ne bloque PAS — génère une alerte à afficher tout au long du parcours.
+    """
+    if not nationality:
+        return None
+    nat_norm = norm(nationality)
+    for country_key, info in SENSITIVE_NATIONALITIES.items():
+        for variation in info["variations"]:
+            if norm(variation) in nat_norm or nat_norm in norm(variation):
+                return {
+                    "country_key": country_key,
+                    "label": info["label"],
+                    "risk_level": info["risk_level"],
+                    "action": info["action"],
+                    "source": info["source"],
+                    "rationale": info["rationale"],
+                    "fatf_date": info.get("fatf_date", ""),
+                }
+    return None
 
 def norm(text: str) -> str:
     if not text:
@@ -166,9 +404,15 @@ class ScreeningEngine:
                 if nature != "Personne physique":
                     continue
 
-                prenoms       = []
-                nationalities = []
-                dob           = ""
+                prenoms         = []
+                nationalities   = []
+                dob             = ""
+                alias           = []
+                lieu_naissance  = ""
+                motif_gel       = str(item.get("Commentaire", "")).strip()
+                reference_legale = str(item.get("Denomination", "") or item.get("Reference", "")).strip()
+                date_designation = str(item.get("DateDesignation", "") or item.get("DateEntreeVigueur", "")).strip()
+                regime          = str(item.get("Regime", "")).strip()
 
                 for detail in item.get("RegistreDetail", []):
                     type_champ = detail.get("TypeChamp")
@@ -193,6 +437,19 @@ class ScreeningEngine:
                             else:
                                 dob = str(y)
 
+                    elif type_champ == "ALIAS":
+                        alias += [v.get("Alias", "") for v in valeurs if v.get("Alias")]
+
+                    elif type_champ == "LIEU_DE_NAISSANCE":
+                        v = valeurs[0] if valeurs else {}
+                        lieu_naissance = f"{v.get('Ville', '')} ({v.get('Pays', '')})".strip(" ()")
+
+                    elif type_champ == "MOTIF":
+                        motif_gel = " ".join([v.get("Motif", "") for v in valeurs if v.get("Motif")]) or motif_gel
+
+                    elif type_champ == "REFERENCE_UE" or type_champ == "REFERENCE":
+                        reference_legale = " | ".join([v.get("Reference", "") for v in valeurs if v.get("Reference")]) or reference_legale
+
                 if not nom and not prenoms:
                     continue
 
@@ -200,11 +457,17 @@ class ScreeningEngine:
                 for prenom in (prenoms if prenoms else [""]):
                     premier = prenom.split()[0] if prenom else ""
                     self.entries.append({
-                        'nom':            nom,
-                        'prenom':         premier,
-                        'prenom_complet': prenom,
-                        'date_naissance': dob,
-                        'nationalite':    [n for n in nationalities if n],
+                        'nom':              nom,
+                        'prenom':           premier,
+                        'prenom_complet':   prenom,
+                        'date_naissance':   dob,
+                        'nationalite':      [n for n in nationalities if n],
+                        'alias':            [a for a in alias if a],
+                        'lieu_naissance':   lieu_naissance,
+                        'motif_gel':        motif_gel,
+                        'reference_legale': reference_legale,
+                        'date_designation': date_designation,
+                        'regime':           regime,
                     })
                     count += 1
 
@@ -278,15 +541,27 @@ class ScreeningEngine:
                     prenom  = str(details.get('prenom', '')).strip()
                     date    = str(details.get('dateNaissance', '')).strip()
                     nat     = str(details.get('nationalite', '')).strip()
+                    alias_raw = details.get('alias', [])
+                    alias   = [str(a) for a in alias_raw] if isinstance(alias_raw, list) else []
+                    motif   = str(m.get('motif', '') or m.get('commentaire', '')).strip()
+                    ref     = str(m.get('reference', '') or m.get('reglementRef', '')).strip()
+                    regime  = str(m.get('regime', '')).strip()
+                    date_desig = str(m.get('dateDesignation', '') or m.get('dateEntreeVigueur', '')).strip()
 
                     if nom or prenom:
                         premier = prenom.split()[0] if prenom else ""
                         self.entries.append({
-                            'nom':            nom,
-                            'prenom':         premier,
-                            'prenom_complet': prenom,
-                            'date_naissance': date,
-                            'nationalite':    [nat] if nat else [],
+                            'nom':              nom,
+                            'prenom':           premier,
+                            'prenom_complet':   prenom,
+                            'date_naissance':   date,
+                            'nationalite':      [nat] if nat else [],
+                            'alias':            alias,
+                            'lieu_naissance':   str(details.get('lieuNaissance', '')).strip(),
+                            'motif_gel':        motif,
+                            'reference_legale': ref,
+                            'date_designation': date_desig,
+                            'regime':           regime,
                         })
                         count += 1
 
@@ -549,41 +824,67 @@ class ScreeningEngine:
         alert = "NONE"
         match_name = ""
 
+        # Construire les détails enrichis du match GDA
+        gda_details = None
+        if best_match and best_score >= SEUIL_REVIEW:
+            prenom_display = best_match.get('prenom_complet', best_match.get('prenom', ''))
+            match_name = f"{prenom_display} {best_match.get('nom', '')}".strip()
+
+            # Construire l'objet de détails
+            gda_details = {
+                "nom_complet":      match_name,
+                "date_naissance":   best_match.get('date_naissance', ''),
+                "lieu_naissance":   best_match.get('lieu_naissance', ''),
+                "nationalite":      best_match.get('nationalite', []),
+                "alias":            best_match.get('alias', []),
+                "motif_gel":        best_match.get('motif_gel', ''),
+                "reference_legale": best_match.get('reference_legale', ''),
+                "date_designation": best_match.get('date_designation', ''),
+                "regime":           best_match.get('regime', ''),
+                "source":           self.source or "Inconnue",
+                "champs_correspondants": matched_fields,
+            }
+
         if best_score >= SEUIL_BLOCK:
             decision = "BLOCK"
-            reason = f"Match GDA fort ({best_score})"
+            reason = f"Match GDA fort — Score de similarité : {best_score}/100"
             alert = "GDA"
-            match_name = f"{best_match.get('prenom', '')} {best_match.get('nom', '')}".strip()
         elif best_score >= SEUIL_REVIEW:
             decision = "REVIEW"
-            reason = f"Match GDA possible ({best_score})"
+            reason = f"Match GDA possible — Score de similarité : {best_score}/100"
             alert = "GDA"
-            match_name = f"{best_match.get('prenom', '')} {best_match.get('nom', '')}".strip()
 
         # PPE
         if is_ppe:
             if alert == "GDA":
                 alert = "BOTH"
-                reason += f" + PPE ({ppe_score})"
+                reason += f" + PPE détecté (score PPE : {ppe_score})"
             else:
                 alert = "PPE"
                 decision = "REVIEW"
-                reason = f"PPE ({ppe_score})"
+                reason = f"PPE détecté — Score risque : {ppe_score} — Fonctions : {', '.join(ppe_kws)}"
 
         if ppe_answers and any(ppe_answers.values()):
             if decision == "OK":
                 decision = "REVIEW"
                 alert = "PPE"
 
+        # Nationalité : NE BLOQUE PAS — alerte informative uniquement
+        nationality_risk = get_nationality_risk(client_data.get("nationality", ""))
+
         return {
             "decision": decision,
             "score": best_score,
             "gda_score": best_score,
             "gda_match": best_score >= SEUIL_REVIEW,
+            "gda_details": gda_details,
             "decision_reason": reason,
             "alert_type": alert,
             "match_name": match_name,
             "matched_fields": matched_fields,
+            "ppe_keywords": ppe_kws,
+            "ppe_score": ppe_score,
+            "nationality_risk": nationality_risk,   # Alerte non-bloquante
             "can_subscribe": decision == "OK"
         }
 
