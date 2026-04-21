@@ -526,6 +526,17 @@ def render_subscription_form():
                         """, unsafe_allow_html=True)
                         render_gda_details(gda_details)
 
+                    elif result["decision"] == "REVIEW" and result.get("alert_type") == "GDA":
+                        gda_details = result.get("gda_details")
+                        st.markdown(f"""
+                        <div class="alert alert-warning">
+                            <strong>⚠️ CORRESPONDANCE GDA POSSIBLE — Vérification requise</strong><br>
+                            {result['decision_reason']}<br>
+                            <small>Vérifiez les détails ci-dessous avant de décider</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        render_gda_details(gda_details)
+
                     else:
                         # Alerte nationalité si présente (non bloquante)
                         if result.get("nationality_risk"):
