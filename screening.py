@@ -37,6 +37,8 @@ if 'form_data' not in st.session_state:
     st.session_state.form_data = {}
 if 'api_last_update' not in st.session_state:
     st.session_state.api_last_update = None
+if 'nationality_alert' not in st.session_state:
+    st.session_state.nationality_alert = None  # Alerte nationalité persistante (non bloquante)
 
 # CSS
 st.markdown("""
@@ -162,6 +164,51 @@ st.markdown("""
         margin-bottom: 1rem !important;
     }
     
+    .alert-nationality-noire {
+        background: #fff1f2;
+        border: 2px solid #e11d48;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin: 0.75rem 0;
+        color: #881337;
+    }
+    .alert-nationality-sanctions {
+        background: #fff7ed;
+        border: 2px solid #ea580c;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin: 0.75rem 0;
+        color: #7c2d12;
+    }
+    .alert-nationality-grise {
+        background: #fffbeb;
+        border: 2px solid #d97706;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin: 0.75rem 0;
+        color: #92400e;
+    }
+    .badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-right: 0.4rem;
+    }
+    .badge-rouge { background: #fecdd3; color: #9f1239; }
+    .badge-orange { background: #fed7aa; color: #9a3412; }
+    .badge-jaune { background: #fef08a; color: #713f12; }
+    .gda-detail-box {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 0.75rem;
+        font-size: 0.88rem;
+    }
     .api-status {
         background: rgba(255,255,255,0.1);
         padding: 0.75rem;
@@ -176,6 +223,99 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+def render_nationality_alert_banner():
+    """
+    Affiche l'alerte nationalité persistante (si présente) à TOUTES les étapes.
+    L'alerte est informative — elle ne bloque PAS le parcours.
+    """
+    alert = st.session_state.get("nationality_alert")
+    if not alert:
+        return
+
+    rl = alert.get("risk_level", "")
+    label = alert.get("label", "")
+    action = alert.get("action", "")
+    source = alert.get("source", "")
+    rationale = alert.get("rationale", "")
+    fatf_date = alert.get("fatf_date", "")
+
+    if rl == "LISTE_NOIRE":
+        css_class = "alert-nationality-noire"
+        badge_class = "badge-rouge"
+        icon = "🔴"
+        titre = "LISTE NOIRE FATF — Contre-mesures obligatoires"
+        action_label = "CONTRE-MESURES"
+    elif rl == "SANCTIONS_UE":
+        css_class = "alert-nationality-sanctions"
+        badge_class = "badge-orange"
+        icon = "🟠"
+        titre = "SANCTIONS UE / DG TRÉSOR — Diligence renforcée"
+        action_label = "DDR RENFORCÉE"
+    else:
+        css_class = "alert-nationality-grise"
+        badge_class = "badge-jaune"
+        icon = "🟡"
+        titre = "LISTE GRISE FATF — Vigilance renforcée"
+        action_label = "VIGILANCE RENFORCÉE"
+
+    date_str = f" (depuis {fatf_date})" if fatf_date else ""
+
+    st.markdown(f"""
+    <div class="{css_class}">
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+            <span style="font-size:1.1rem">{icon}</span>
+            <strong>⚠️ ALERTE NATIONALITÉ PERSISTANTE</strong>
+            <span class="badge {badge_class}">{action_label}</span>
+        </div>
+        <div><strong>Pays concerné :</strong> {label}{date_str}</div>
+        <div style="margin-top:0.4rem; font-size:0.88rem;"><strong>Motif :</strong> {rationale}</div>
+        <div style="margin-top:0.4rem; font-size:0.82rem; opacity:0.85;"><strong>Base légale :</strong> {source}</div>
+        <div style="margin-top:0.5rem; padding:0.4rem 0.75rem; background:rgba(0,0,0,0.04); border-radius:6px; font-size:0.82rem;">
+            ℹ️ <em>La nationalité d'un pays à risque ne signifie pas que la personne est elle-même sanctionnée.
+            Ce dossier peut être poursuivi avec une diligence renforcée obligatoire (DDR).
+            Un rapport de sûreté doit être conservé au dossier.</em>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_gda_details(details: dict):
+    """Affiche les détails enrichis d'un match GDA dans un expander."""
+    if not details:
+        return
+
+    nats = ', '.join(details.get('nationalite', [])) or 'N/A'
+    aliases = ', '.join(details.get('alias', [])) or 'N/A'
+    champs = ', '.join(details.get('champs_correspondants', [])) or 'Nom/Prénom'
+
+    motif = details.get('motif_gel') or '—'
+    ref = details.get('reference_legale') or '—'
+    date_desig = details.get('date_designation') or '—'
+    regime = details.get('regime') or '—'
+    lieu_naiss = details.get('lieu_naissance') or 'N/A'
+    source = details.get('source', 'Inconnue')
+
+    with st.expander("📋 Détails complets de la personne détectée dans le registre GDA", expanded=True):
+        st.markdown(f"""
+        <div class="gda-detail-box">
+            <table>
+                <tr><td>👤 Nom complet</td><td><strong>{details.get('nom_complet', 'N/A')}</strong></td></tr>
+                <tr><td>🎂 Date de naissance</td><td>{details.get('date_naissance') or 'N/A'}</td></tr>
+                <tr><td>📍 Lieu de naissance</td><td>{lieu_naiss}</td></tr>
+                <tr><td>🌍 Nationalité(s)</td><td>{nats}</td></tr>
+                <tr><td>🏷️ Alias / Autres noms</td><td>{aliases}</td></tr>
+                <tr><td>⚖️ Motif du gel</td><td>{motif}</td></tr>
+                <tr><td>📎 Référence légale / UE</td><td>{ref}</td></tr>
+                <tr><td>🗓️ Date de désignation</td><td>{date_desig}</td></tr>
+                <tr><td>🏛️ Régime de sanctions</td><td>{regime}</td></tr>
+                <tr><td>🔗 Source des données</td><td>{source}</td></tr>
+                <tr><td>✅ Champs correspondants</td><td>{champs}</td></tr>
+            </table>
+        </div>
+        """, unsafe_allow_html=True)
+        st.caption("⚠️ Ces informations proviennent du Registre National des Gels d'Avoirs (DG Trésor / Monaco). Elles ne doivent pas être divulguées au client.")
+
 
 def get_register_last_update():
     """Récupère la date de dernière mise à jour du registre"""
@@ -223,6 +363,9 @@ def render_subscription_form():
 
     render_progress(st.session_state.step)
 
+    # ── BANNIÈRE ALERTE NATIONALITÉ PERSISTANTE ──────────────────────────────
+    render_nationality_alert_banner()
+
     # ÉTAPE 1 : GDA
     if st.session_state.step == 1:
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -265,72 +408,76 @@ def render_subscription_form():
 
                 st.markdown(f"""
                 <div class="alert alert-danger">
-                    🚫 <strong>BLOCAGE AUTOMATIQUE</strong><br>
-                    Correspondance détectée avec : <strong>{matched_name}</strong> (score: {score})<br>
-                    ❌ Impossible de poursuivre la souscription.
+                    🚫 <strong>BLOCAGE AUTOMATIQUE — CORRESPONDANCE GDA DÉTECTÉE</strong><br>
+                    Similarité avec : <strong>{matched_name}</strong> (score : {score}/100)<br>
+                    ❌ Souscription impossible — vérification manuelle obligatoire.
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Afficher détails en déroulé
+                # Détails enrichis
                 if matched_person_details:
-                    with st.expander("📋 Détails de la personne détectée", expanded=False):
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.markdown(f"**Prénom complet :** {matched_person_details.get('prenom_complet', 'N/A')}")
-                            st.markdown(f"**Nom :** {matched_person_details.get('nom', 'N/A')}")
-                        with col_b:
-                            st.markdown(f"**Date naissance :** {matched_person_details.get('date_naissance', 'N/A')}")
-                            nats = matched_person_details.get('nationalite', [])
-                            nat_display = ', '.join(nats) if nats else 'N/A'
-                            st.markdown(f"**Nationalité :** {nat_display}")
+                    nats = ', '.join(matched_person_details.get('nationalite', [])) or 'N/A'
+                    aliases = ', '.join(matched_person_details.get('alias', [])) or 'N/A'
+                    motif = matched_person_details.get('motif_gel') or '—'
+                    ref = matched_person_details.get('reference_legale') or '—'
+                    date_desig = matched_person_details.get('date_designation') or '—'
+                    regime = matched_person_details.get('regime') or '—'
+                    lieu_naiss = matched_person_details.get('lieu_naissance') or 'N/A'
+
+                    with st.expander("📋 Détails de la personne détectée dans le registre GDA", expanded=True):
+                        st.markdown(f"""
+                        <div class="gda-detail-box">
+                            <table>
+                                <tr><td>👤 Nom complet</td><td><strong>{matched_person_details.get('prenom_complet', matched_person_details.get('prenom', ''))} {matched_person_details.get('nom', '')}</strong></td></tr>
+                                <tr><td>🎂 Date de naissance</td><td>{matched_person_details.get('date_naissance') or 'N/A'}</td></tr>
+                                <tr><td>📍 Lieu de naissance</td><td>{lieu_naiss}</td></tr>
+                                <tr><td>🌍 Nationalité(s)</td><td>{nats}</td></tr>
+                                <tr><td>🏷️ Alias / Autres noms</td><td>{aliases}</td></tr>
+                                <tr><td>⚖️ Motif du gel</td><td>{motif}</td></tr>
+                                <tr><td>📎 Référence légale / UE</td><td>{ref}</td></tr>
+                                <tr><td>🗓️ Date de désignation</td><td>{date_desig}</td></tr>
+                                <tr><td>🏛️ Régime de sanctions</td><td>{regime}</td></tr>
+                            </table>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.caption("⚠️ Ces informations proviennent du Registre National des Gels d'Avoirs. Ne pas divulguer au client.")
 
             elif is_match and score >= 50:
                 st.markdown(f"""
                 <div class="alert alert-warning">
-                    ⚠️ <strong>ATTENTION</strong> : Correspondance possible détectée !<br>
-                    <strong>{matched_name}</strong> (score: {score})<br>
-                    Vérifiez attentivement avant de continuer.
+                    ⚠️ <strong>ATTENTION</strong> : Correspondance possible dans le registre GDA<br>
+                    <strong>{matched_name}</strong> (score : {score}/100)<br>
+                    Vérifiez attentivement les informations avant de continuer.
                 </div>
                 """, unsafe_allow_html=True)
 
-        # VÉRIFIER AUSSI LA NATIONALITÉ EN TEMPS RÉEL
-        if nationality and not detection_bloquante:
-            # Normaliser et vérifier
-            from screening_engine import norm, SENSITIVE_NATIONALITIES
-            nat_norm = norm(nationality)
+        # VÉRIFICATION NATIONALITÉ — non bloquante, alerte persistante
+        if nationality:
+            from screening_engine import get_nationality_risk
+            nat_risk = get_nationality_risk(nationality)
+            if nat_risk:
+                # Stocker l'alerte en session pour la rendre persistante
+                st.session_state.nationality_alert = nat_risk
+                # Afficher immédiatement
+                render_nationality_alert_banner()
+            else:
+                # Réinitialiser si nationalité non sensible
+                if st.session_state.nationality_alert is not None:
+                    st.session_state.nationality_alert = None
 
-            for country, variations in SENSITIVE_NATIONALITIES.items():
-                for variation in variations:
-                    if norm(variation) in nat_norm:
-                        detection_bloquante = True
-                        st.markdown(f"""
-                        <div class="alert alert-danger">
-                            🚫 <strong>BLOCAGE AUTOMATIQUE - Nationalité sensible</strong><br>
-                            Nationalité détectée : <strong>{nationality}</strong><br>
-                            ❌ Cette nationalité nécessite une validation manuelle obligatoire.
-                        </div>
-                        """, unsafe_allow_html=True)
-                        break
-                if detection_bloquante:
-                    break
-
-        st.caption("💡 _La nationalité et date de naissance permettent d'éviter les homonymes et de détecter les nationalités sensibles (Russie, Chine, Iran, etc.)_")
+        st.caption("💡 _La nationalité et date de naissance permettent d'éviter les homonymes. Une nationalité à risque génère une alerte de diligence renforcée (DDR) — elle ne bloque pas la souscription._")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
         col_btn = st.columns([1, 2, 1])
         with col_btn[1]:
-            # Désactiver le bouton si détection bloquante
-            button_clicked = st.button("🔍 Vérifier GDA + Nationalité", use_container_width=True, disabled=detection_bloquante)
+            button_clicked = st.button("🔍 Vérifier GDA", use_container_width=True, disabled=detection_bloquante)
 
-            # Message si tentative malgré blocage
             if detection_bloquante:
-                st.caption("⚠️ _Impossible de continuer : correspondance GDA détectée_")
+                st.caption("⚠️ _Impossible de continuer : correspondance GDA détectée — contact référent obligatoire_")
 
-            # NE PAS EXÉCUTER si détection bloquante, même si le bouton est cliqué
             if button_clicked and not detection_bloquante:
                 if first_name and last_name:
-                    # Préparer les données
                     client_data = {
                         "first_name": first_name,
                         "last_name": last_name,
@@ -338,37 +485,34 @@ def render_subscription_form():
                         "nationality": nationality if nationality else None
                     }
 
-                    # UTILISER L'ALGORITHME EXACT du screening_engine.py
-                    # Le fichier JSON est déjà chargé dans screening_engine
                     result = st.session_state.screening_engine.screen_client(client_data)
 
-                    # Afficher selon la décision
+                    # Mettre à jour l'alerte nationalité en session
+                    if result.get("nationality_risk"):
+                        st.session_state.nationality_alert = result["nationality_risk"]
+                    else:
+                        st.session_state.nationality_alert = None
+
                     if result["decision"] == "BLOCK":
+                        gda_details = result.get("gda_details")
                         st.markdown(f"""
                         <div class="alert alert-danger">
-                            <strong>🚨 ALERTE CRITIQUE - GDA</strong><br>
-                            Correspondance détectée (score: {result['gda_score']}%)<br>
+                            <strong>🚨 BLOCAGE GDA — CORRESPONDANCE FORTE</strong><br>
                             {result['decision_reason']}<br>
-                            <small>Email envoyé automatiquement</small>
+                            <small>Rapport de blocage à transmettre au référent LCB-FT</small>
                         </div>
                         """, unsafe_allow_html=True)
-
-                    elif result["decision"] == "REVIEW" and result["alert_type"] == "NATIONALITY":
-                        st.markdown(f"""
-                        <div class="alert alert-warning">
-                            <strong>⚠️ ALERTE VIGILANCE - Nationalité Sensible</strong><br>
-                            Nationalité : {nationality}<br>
-                            Risque : {result.get('nationality_risk', {}).get('risk_level', 'N/A')}<br>
-                            {result['decision_reason']}<br>
-                            <small>⏸️ Dossier en pause - Validation Référente requise (24h)</small>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        render_gda_details(gda_details)
 
                     else:
+                        # Alerte nationalité si présente (non bloquante)
+                        if result.get("nationality_risk"):
+                            render_nationality_alert_banner()
+
                         st.markdown("""
                         <div class="alert alert-success">
-                            <strong>✓ GDA et Nationalité : OK</strong><br>
-                            Aucune correspondance GDA • Nationalité standard
+                            <strong>✓ Contrôle GDA : aucune correspondance</strong><br>
+                            Passage à l'étape suivante autorisé
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -384,7 +528,7 @@ def render_subscription_form():
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("""
         <div class="alert alert-success">
-            <strong>✓ Étape 1 validée</strong> - GDA et Nationalité OK
+            <strong>✓ Étape 1 validée</strong> — Contrôle GDA : aucune correspondance
         </div>
         """, unsafe_allow_html=True)
 
@@ -407,16 +551,18 @@ def render_subscription_form():
                 if profession:
                     client_data = {**st.session_state.form_data, "profession": profession}
 
-                    # ALGORITHME EXACT
                     result = st.session_state.screening_engine.screen_client(client_data)
 
                     if result["decision"] == "REVIEW" and result["alert_type"] == "PPE":
+                        kws = ', '.join(result.get('ppe_keywords', [])) or 'N/A'
+                        ppe_score = result.get('ppe_score', 0)
                         st.markdown(f"""
                         <div class="alert alert-warning">
-                            <strong>⚠️ ALERTE PPE RENFORCÉ</strong><br>
-                            Fonction détectée : {', '.join(result.get('ppe_keywords', []))}<br>
-                            {result['decision_reason']}<br>
-                            <small>⏸️ Validation Référente requise (48h)</small>
+                            <strong>⚠️ ALERTE PPE — Fonction à risque détectée</strong><br>
+                            <strong>Fonction(s) identifiée(s) :</strong> {kws}<br>
+                            <strong>Score de risque PPE :</strong> {ppe_score}/100<br>
+                            <strong>Motif :</strong> {result['decision_reason']}<br>
+                            <small>⏸️ Validation Référente LCB-FT requise sous 48h</small>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -510,11 +656,22 @@ def render_subscription_form():
                 )
 
                 if result["decision"] == "REVIEW":
+                    kws = ', '.join(result.get('ppe_keywords', [])) or 'N/A'
+                    ppe_sc = result.get('ppe_score', 0)
+                    ppe_flags = []
+                    if q1: ppe_flags.append("PPE actuelle")
+                    if q2: ppe_flags.append("PPE cessée < 1 an")
+                    if q3: ppe_flags.append("Proche parent PPE")
+                    if q4: ppe_flags.append("Associé proche d'une PPE")
+
                     st.markdown(f"""
                     <div class="alert alert-warning">
-                        <strong>⚠️ ALERTE PPE RENFORCÉ</strong><br>
-                        {result['decision_reason']}<br>
-                        <small>⏸️ Validation Référente requise (48h)</small>
+                        <strong>⚠️ ALERTE PPE RENFORCÉE — Validation obligatoire</strong><br>
+                        <strong>Raison :</strong> {result['decision_reason']}<br>
+                        {"<strong>Fonctions à risque :</strong> " + kws + "<br>" if kws and kws != "N/A" else ""}
+                        {"<strong>Déclarations PPE :</strong> " + " | ".join(ppe_flags) + "<br>" if ppe_flags else ""}
+                        <strong>Score PPE :</strong> {ppe_sc}/100<br>
+                        <small>⏸️ Dossier suspendu — Validation Référente LCB-FT requise sous 48h</small>
                     </div>
                     """, unsafe_allow_html=True)
                 else:
@@ -526,12 +683,31 @@ def render_subscription_form():
     # ÉTAPE 4 : Finalisation
     elif st.session_state.step == 4:
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("""
+
+        # Résumé des contrôles
+        nat_alert = st.session_state.get("nationality_alert")
+        if nat_alert:
+            rl = nat_alert.get("risk_level", "")
+            action_label = {"LISTE_NOIRE": "DDR Renforcée (liste noire FATF)", "SANCTIONS_UE": "DDR Renforcée (sanctions UE)", "LISTE_GRISE": "Vigilance Renforcée (liste grise FATF)"}.get(rl, "DDR Renforcée")
+            checks_html = f"GDA ✓ • Nationalité ⚠️ {action_label} • PPE Métier ✓ • Questions PPE ✓"
+        else:
+            checks_html = "GDA ✓ • Nationalité ✓ • PPE Métier ✓ • Questions PPE ✓"
+
+        st.markdown(f"""
         <div class="alert alert-success">
-            <strong>✓ Vérification complète validée</strong><br>
-            GDA ✓ • Nationalité ✓ • PPE Métier ✓ • Questions PPE ✓
+            <strong>✓ Vérification complète</strong><br>
+            {checks_html}
         </div>
         """, unsafe_allow_html=True)
+
+        # Rappel alerte nationalité si présente
+        if nat_alert:
+            st.markdown(f"""
+            <div class="alert alert-warning" style="font-size:0.88rem;">
+                ⚠️ <strong>Rappel DDR :</strong> Ce dossier nécessite une diligence renforcée — nationalité à risque ({nat_alert.get('label', '')}). 
+                Mentionner dans le rapport de souscription et conserver la justification au dossier.
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("### Informations complémentaires")
 
