@@ -697,13 +697,14 @@ def render_subscription_form():
                     if q3: ppe_flags.append("Proche parent PPE")
                     if q4: ppe_flags.append("Associé proche d'une PPE")
 
+                    line_kws    = f"<strong>Fonctions à risque :</strong> {kws}<br>" if kws and kws != "N/A" else ""
+                    line_flags  = f"<strong>Déclarations PPE :</strong> {' | '.join(ppe_flags)}<br>" if ppe_flags else ""
+
                     st.markdown(f"""
                     <div class="alert alert-warning">
                         <strong>⚠️ ALERTE PPE RENFORCÉE — Validation obligatoire</strong><br>
                         <strong>Raison :</strong> {result['decision_reason']}<br>
-                        {"<strong>Fonctions à risque :</strong> " + kws + "<br>" if kws and kws != "N/A" else ""}
-                        {"<strong>Déclarations PPE :</strong> " + " | ".join(ppe_flags) + "<br>" if ppe_flags else ""}
-                        <strong>Score PPE :</strong> {ppe_sc}/100<br>
+                        {line_kws}{line_flags}<strong>Score PPE :</strong> {ppe_sc}/100<br>
                         <small>⏸️ Dossier suspendu — Validation Référente LCB-FT requise sous 48h</small>
                     </div>
                     """, unsafe_allow_html=True)
@@ -931,7 +932,7 @@ def main():
 
             # Bouton pour voir échantillon
             if st.button("🔍 Voir échantillon (50)", use_container_width=True):
-                with st.expander("📋 Échantillon du registre", expanded=True):
+                with st.expander("Échantillon du registre", expanded=True):
                     for i, entry in enumerate(st.session_state.screening_engine.entries[:50], 1):
                         prenom = entry.get('prenom', '')
                         nom = entry.get('nom', '')
