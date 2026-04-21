@@ -281,40 +281,49 @@ def render_nationality_alert_banner():
 
 
 def render_gda_details(details: dict):
-    """Affiche les détails enrichis d'un match GDA dans un expander."""
+    """Affiche les détails enrichis d'un match GDA — colonnes exactes du registre."""
     if not details:
         return
 
-    nats = ', '.join(details.get('nationalite', [])) or 'N/A'
-    aliases = ', '.join(details.get('alias', [])) or 'N/A'
-    champs = ', '.join(details.get('champs_correspondants', [])) or 'Nom/Prénom'
+    nats          = ', '.join(details.get('nationalite', [])) or '—'
+    aliases       = ', '.join(details.get('alias', [])) or '—'
+    passeports    = ', '.join(details.get('passeport', [])) or '—'
+    identifications = ', '.join(details.get('identification', [])) or '—'
+    adresses      = ' | '.join(details.get('adresse', [])) or '—'
+    champs        = ', '.join(details.get('champs_correspondants', [])) or 'Nom / Prénom'
 
-    motif = details.get('motif_gel') or '—'
-    ref = details.get('reference_legale') or '—'
-    date_desig = details.get('date_designation') or '—'
-    regime = details.get('regime') or '—'
-    lieu_naiss = details.get('lieu_naissance') or 'N/A'
-    source = details.get('source', 'Inconnue')
+    id_reg        = details.get('id_registre') or '—'
+    regime        = details.get('regime') or '—'
+    titre         = details.get('titre') or '—'
+    date_naiss    = details.get('date_naissance') or '—'
+    lieu_naiss    = details.get('lieu_naissance') or '—'
+    fondement     = details.get('fondement_jur') or '—'
+    motifs        = details.get('motifs') or '—'
+    source        = details.get('source', 'Inconnue')
 
-    with st.expander("📋 Détails complets de la personne détectée dans le registre GDA", expanded=True):
+    with st.expander("📋 Détails complets — Registre GDA (DG Trésor)", expanded=True):
         st.markdown(f"""
         <div class="gda-detail-box">
             <table>
-                <tr><td>👤 Nom complet</td><td><strong>{details.get('nom_complet', 'N/A')}</strong></td></tr>
-                <tr><td>🎂 Date de naissance</td><td>{details.get('date_naissance') or 'N/A'}</td></tr>
+                <tr><td>🆔 Id registre</td><td>{id_reg}</td></tr>
+                <tr><td>🏛️ Régime</td><td><strong>{regime}</strong></td></tr>
+                <tr><td>👤 Nom complet</td><td><strong>{details.get('nom_complet', '—')}</strong></td></tr>
+                <tr><td>🏷️ Alias / Autres noms</td><td>{aliases}</td></tr>
+                <tr><td>🎖️ Titre</td><td>{titre}</td></tr>
+                <tr><td>🎂 Date de naissance</td><td>{date_naiss}</td></tr>
                 <tr><td>📍 Lieu de naissance</td><td>{lieu_naiss}</td></tr>
                 <tr><td>🌍 Nationalité(s)</td><td>{nats}</td></tr>
-                <tr><td>🏷️ Alias / Autres noms</td><td>{aliases}</td></tr>
-                <tr><td>⚖️ Motif du gel</td><td>{motif}</td></tr>
-                <tr><td>📎 Référence légale / UE</td><td>{ref}</td></tr>
-                <tr><td>🗓️ Date de désignation</td><td>{date_desig}</td></tr>
-                <tr><td>🏛️ Régime de sanctions</td><td>{regime}</td></tr>
-                <tr><td>🔗 Source des données</td><td>{source}</td></tr>
+                <tr><td>🏠 Adresse</td><td>{adresses}</td></tr>
+                <tr><td>🛂 Passeport(s)</td><td>{passeports}</td></tr>
+                <tr><td>🪪 Identification</td><td>{identifications}</td></tr>
+                <tr><td>⚖️ Fondement juridique</td><td>{fondement}</td></tr>
+                <tr><td>📝 Motifs</td><td>{motifs}</td></tr>
+                <tr><td>🔗 Source</td><td>{source}</td></tr>
                 <tr><td>✅ Champs correspondants</td><td>{champs}</td></tr>
             </table>
         </div>
         """, unsafe_allow_html=True)
-        st.caption("⚠️ Ces informations proviennent du Registre National des Gels d'Avoirs (DG Trésor / Monaco). Elles ne doivent pas être divulguées au client.")
+        st.caption("⚠️ Informations issues du Registre National des Gels d'Avoirs. Strictement réservées à l'usage interne — ne pas divulguer au client.")
 
 
 def get_register_last_update():
@@ -414,33 +423,43 @@ def render_subscription_form():
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Détails enrichis
+                # Détails enrichis — colonnes exactes du registre
                 if matched_person_details:
-                    nats = ', '.join(matched_person_details.get('nationalite', [])) or 'N/A'
-                    aliases = ', '.join(matched_person_details.get('alias', [])) or 'N/A'
-                    motif = matched_person_details.get('motif_gel') or '—'
-                    ref = matched_person_details.get('reference_legale') or '—'
-                    date_desig = matched_person_details.get('date_designation') or '—'
-                    regime = matched_person_details.get('regime') or '—'
-                    lieu_naiss = matched_person_details.get('lieu_naissance') or 'N/A'
+                    nats    = ', '.join(matched_person_details.get('nationalite', [])) or '—'
+                    aliases = ', '.join(matched_person_details.get('alias', [])) or '—'
+                    ppts    = ', '.join(matched_person_details.get('passeport', [])) or '—'
+                    ids     = ', '.join(matched_person_details.get('identification', [])) or '—'
+                    addrs   = ' | '.join(matched_person_details.get('adresse', [])) or '—'
+                    motifs  = matched_person_details.get('motifs') or '—'
+                    fond    = matched_person_details.get('fondement_jur') or '—'
+                    regime  = matched_person_details.get('regime') or '—'
+                    titre   = matched_person_details.get('titre') or '—'
+                    id_reg  = matched_person_details.get('id_registre') or '—'
+                    lieu    = matched_person_details.get('lieu_naissance') or '—'
+                    ddn     = matched_person_details.get('date_naissance') or '—'
+                    nom_aff = f"{matched_person_details.get('prenom_complet', matched_person_details.get('prenom', ''))} {matched_person_details.get('nom', '')}".strip()
 
-                    with st.expander("📋 Détails de la personne détectée dans le registre GDA", expanded=True):
+                    with st.expander("📋 Détails — Registre GDA (DG Trésor)", expanded=True):
                         st.markdown(f"""
                         <div class="gda-detail-box">
                             <table>
-                                <tr><td>👤 Nom complet</td><td><strong>{matched_person_details.get('prenom_complet', matched_person_details.get('prenom', ''))} {matched_person_details.get('nom', '')}</strong></td></tr>
-                                <tr><td>🎂 Date de naissance</td><td>{matched_person_details.get('date_naissance') or 'N/A'}</td></tr>
-                                <tr><td>📍 Lieu de naissance</td><td>{lieu_naiss}</td></tr>
-                                <tr><td>🌍 Nationalité(s)</td><td>{nats}</td></tr>
+                                <tr><td>🆔 Id registre</td><td>{id_reg}</td></tr>
+                                <tr><td>🏛️ Régime</td><td><strong>{regime}</strong></td></tr>
+                                <tr><td>👤 Nom complet</td><td><strong>{nom_aff}</strong></td></tr>
                                 <tr><td>🏷️ Alias / Autres noms</td><td>{aliases}</td></tr>
-                                <tr><td>⚖️ Motif du gel</td><td>{motif}</td></tr>
-                                <tr><td>📎 Référence légale / UE</td><td>{ref}</td></tr>
-                                <tr><td>🗓️ Date de désignation</td><td>{date_desig}</td></tr>
-                                <tr><td>🏛️ Régime de sanctions</td><td>{regime}</td></tr>
+                                <tr><td>🎖️ Titre</td><td>{titre}</td></tr>
+                                <tr><td>🎂 Date de naissance</td><td>{ddn}</td></tr>
+                                <tr><td>📍 Lieu de naissance</td><td>{lieu}</td></tr>
+                                <tr><td>🌍 Nationalité(s)</td><td>{nats}</td></tr>
+                                <tr><td>🏠 Adresse</td><td>{addrs}</td></tr>
+                                <tr><td>🛂 Passeport(s)</td><td>{ppts}</td></tr>
+                                <tr><td>🪪 Identification</td><td>{ids}</td></tr>
+                                <tr><td>⚖️ Fondement juridique</td><td>{fond}</td></tr>
+                                <tr><td>📝 Motifs</td><td>{motifs}</td></tr>
                             </table>
                         </div>
                         """, unsafe_allow_html=True)
-                        st.caption("⚠️ Ces informations proviennent du Registre National des Gels d'Avoirs. Ne pas divulguer au client.")
+                        st.caption("⚠️ Informations issues du Registre National des Gels d'Avoirs. Strictement réservées à l'usage interne — ne pas divulguer au client.")
 
             elif is_match and score >= 50:
                 st.markdown(f"""
