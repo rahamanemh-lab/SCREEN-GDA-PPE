@@ -404,26 +404,47 @@ class ScreeningEngine:
                 if nature != "Personne physique":
                     continue
 
-                prenoms         = []
-                nationalities   = []
-                dob             = ""
-                alias           = []
-                lieu_naissance  = ""
-                motif_gel       = str(item.get("Commentaire", "")).strip()
-                reference_legale = str(item.get("Denomination", "") or item.get("Reference", "")).strip()
-                date_designation = str(item.get("DateDesignation", "") or item.get("DateEntreeVigueur", "")).strip()
-                regime          = str(item.get("Regime", "")).strip()
+                # ── Colonnes du registre GDA (mapping exact) ────────────────
+                # Id | Régime | Type de nature | Nom | Prénom | Alias
+                # Date de naissance | Lieu de naissance | Nationalité | Titre
+                # Adresse | Passeport | Identification | Fondement juridique | Motifs
+
+                prenoms          = []
+                nationalities    = []
+                dob              = ""
+                alias            = []
+                lieu_naissance   = ""
+                titre            = ""
+                adresse          = []
+                passeport        = []
+                identification   = []
+                fondement_jur    = str(item.get("FondementJuridique", "")).strip()
+                motifs           = str(item.get("Motifs", "")).strip()
+                regime           = str(item.get("Regime", "")).strip()
+                id_registre      = str(item.get("Id", "")).strip()
 
                 for detail in item.get("RegistreDetail", []):
-                    type_champ = detail.get("TypeChamp")
+                    type_champ = detail.get("TypeChamp", "")
                     valeurs    = detail.get("Valeur") or []
 
+                    # ── Prénom ──────────────────────────────────────────────
                     if type_champ == "PRENOM":
                         prenoms += [v.get("Prenom", "") for v in valeurs if v.get("Prenom")]
 
-                    elif type_champ == "NATIONALITE":
-                        nationalities += [v.get("Pays", "") for v in valeurs if v.get("Pays")]
+                    # ── Alias ───────────────────────────────────────────────
+                    elif type_champ == "ALIAS":
+                        for v in valeurs:
+                            # La valeur alias peut être dans différentes clés
+                            a = (v.get("Alias") or v.get("Nom") or v.get("Prenom") or
+                                 v.get("NomAlias") or v.get("PrenomAlias") or "")
+                            nom_a = v.get("Nom", "")
+                            prenom_a = v.get("Prenom", "")
+                            if nom_a or prenom_a:
+                                a = f"{prenom_a} {nom_a}".strip()
+                            if a:
+                                alias.append(a)
 
+                    # ── Date de naissance ────────────────────────────────────
                     elif type_champ == "DATE_DE_NAISSANCE":
                         v = valeurs[0] if valeurs else {}
                         y = v.get("Annee", "")
@@ -437,37 +458,107 @@ class ScreeningEngine:
                             else:
                                 dob = str(y)
 
-                    elif type_champ == "ALIAS":
-                        alias += [v.get("Alias", "") for v in valeurs if v.get("Alias")]
-
+                    # ── Lieu de naissance ────────────────────────────────────
                     elif type_champ == "LIEU_DE_NAISSANCE":
                         v = valeurs[0] if valeurs else {}
-                        lieu_naissance = f"{v.get('Ville', '')} ({v.get('Pays', '')})".strip(" ()")
+                        ville = v.get("Ville", "").strip()
+                        pays  = v.get("Pays", "").strip()
+                        if ville and pays:
+                            lieu_naissance = f"{ville} ({pays})"
+                        elif ville:
+                            lieu_naissance = ville
+                        elif pays:
+                            lieu_naissance = pays
 
-                    elif type_champ == "MOTIF":
-                        motif_gel = " ".join([v.get("Motif", "") for v in valeurs if v.get("Motif")]) or motif_gel
+                    # ── Nationalité ──────────────────────────────────────────
+                    elif type_champ == "NATIONALITE":
+                        nationalities += [v.get("Pays", "") for v in valeurs if v.get("Pays")]
 
-                    elif type_champ == "REFERENCE_UE" or type_champ == "REFERENCE":
-                        reference_legale = " | ".join([v.get("Reference", "") for v in valeurs if v.get("Reference")]) or reference_legale
+                    # ── Titre ────────────────────────────────────────────────
+                    elif type_champ == "TITRE":
+                        titre = " | ".join([v.get("Titre", "") for v in valeurs if v.get("Titre")])
+
+                    # ── Adresse ──────────────────────────────────────────────
+                    elif type_champ == "ADRESSE":
+                        for v in valeurs:
+                            parts = [
+                                v.get("Adresse", ""),
+                                v.get("Ville", ""),
+                                v.get("CodePostal", ""),
+                                v.get("Pays", ""),
+                            ]
+                            addr = ", ".join(p for p in parts if p)
+                            if addr:
+                                adresse.append(addr)
+
+                    # ── Passeport ────────────────────────────────────────────
+                    elif type_champ == "PASSEPORT":
+                        for v in valeurs:
+                            num = v.get("NumeroPasseport") or v.get("Numero") or v.get("NumPasseport") or ""
+                            pays_p = v.get("Pays", "")
+                            if num:
+                                passeport.append(f"{num} ({pays_p})" if pays_p else num)
+
+                    # ── Identification (carte nationale, autres docs) ─────────
+                    elif type_champ in ("IDENTIFICATION", "NUMERO_IDENTIFICATION",
+                                        "CARTE_IDENTITE", "DOCUMENT_IDENTITE"):
+                        for v in valeurs:
+                            num = (v.get("Numero") or v.get("NumeroIdentification") or
+                                   v.get("NumeroDocument") or "")
+                            type_doc = v.get("TypeDocument", "") or v.get("Type", "")
+                            pays_i = v.get("Pays", "")
+                            if num:
+                                label_id = f"{type_doc} {num}".strip()
+                                if pays_i:
+                                    label_id += f" ({pays_i})"
+                                identification.append(label_id)
+
+                    # ── Fondement juridique ──────────────────────────────────
+                    elif type_champ in ("FONDEMENT_JURIDIQUE", "REFERENCE_JURIDIQUE",
+                                        "REFERENCE_UE", "REFERENCE"):
+                        refs = [v.get("FondementJuridique") or v.get("Reference") or
+                                v.get("Intitule") or v.get("Texte") or ""
+                                for v in valeurs]
+                        refs = [r for r in refs if r]
+                        if refs:
+                            fondement_jur = " | ".join(refs)
+
+                    # ── Motifs ───────────────────────────────────────────────
+                    elif type_champ in ("MOTIFS", "MOTIF"):
+                        mots = [v.get("Motifs") or v.get("Motif") or v.get("Texte") or ""
+                                for v in valeurs]
+                        mots = [m for m in mots if m]
+                        if mots:
+                            motifs = " ".join(mots)
 
                 if not nom and not prenoms:
                     continue
 
-                # Une entrée par prénom (comme dans screening.py)
+                # Une entrée par prénom (comme dans le reste du code)
                 for prenom in (prenoms if prenoms else [""]):
                     premier = prenom.split()[0] if prenom else ""
                     self.entries.append({
-                        'nom':              nom,
-                        'prenom':           premier,
-                        'prenom_complet':   prenom,
-                        'date_naissance':   dob,
-                        'nationalite':      [n for n in nationalities if n],
-                        'alias':            [a for a in alias if a],
-                        'lieu_naissance':   lieu_naissance,
-                        'motif_gel':        motif_gel,
-                        'reference_legale': reference_legale,
-                        'date_designation': date_designation,
-                        'regime':           regime,
+                        # ── Identité ────────────────────────────────────────
+                        'id_registre':     id_registre,
+                        'regime':          regime,
+                        'nom':             nom,
+                        'prenom':          premier,
+                        'prenom_complet':  prenom,
+                        'alias':           [a for a in alias if a],
+                        'titre':           titre,
+                        # ── Naissance ───────────────────────────────────────
+                        'date_naissance':  dob,
+                        'lieu_naissance':  lieu_naissance,
+                        # ── Nationalité ─────────────────────────────────────
+                        'nationalite':     [n for n in nationalities if n],
+                        # ── Documents ───────────────────────────────────────
+                        'passeport':       passeport,
+                        'identification':  identification,
+                        # ── Localisation ────────────────────────────────────
+                        'adresse':         adresse,
+                        # ── Sanctions ───────────────────────────────────────
+                        'fondement_jur':   fondement_jur,   # = "Fondement juridique"
+                        'motifs':          motifs,           # = "Motifs"
                     })
                     count += 1
 
@@ -543,25 +634,35 @@ class ScreeningEngine:
                     nat     = str(details.get('nationalite', '')).strip()
                     alias_raw = details.get('alias', [])
                     alias   = [str(a) for a in alias_raw] if isinstance(alias_raw, list) else []
-                    motif   = str(m.get('motif', '') or m.get('commentaire', '')).strip()
-                    ref     = str(m.get('reference', '') or m.get('reglementRef', '')).strip()
-                    regime  = str(m.get('regime', '')).strip()
-                    date_desig = str(m.get('dateDesignation', '') or m.get('dateEntreeVigueur', '')).strip()
+                    # Colonnes registre : Motifs | Fondement juridique | Régime | Titre | Adresse | Passeport
+                    motifs        = str(m.get('motif', '') or m.get('motifs', '') or m.get('commentaire', '')).strip()
+                    fondement_jur = str(m.get('reference', '') or m.get('reglementRef', '') or m.get('fondementJuridique', '')).strip()
+                    regime        = str(m.get('regime', '')).strip()
+                    titre         = str(details.get('titre', '')).strip()
+                    lieu_naiss    = str(details.get('lieuNaissance', '')).strip()
+                    adresse_raw   = details.get('adresse', '')
+                    adresse       = [str(adresse_raw)] if adresse_raw else []
+                    passeport_raw = details.get('passeport', '')
+                    passeport     = [str(passeport_raw)] if passeport_raw else []
 
                     if nom or prenom:
                         premier = prenom.split()[0] if prenom else ""
                         self.entries.append({
-                            'nom':              nom,
-                            'prenom':           premier,
-                            'prenom_complet':   prenom,
-                            'date_naissance':   date,
-                            'nationalite':      [nat] if nat else [],
-                            'alias':            alias,
-                            'lieu_naissance':   str(details.get('lieuNaissance', '')).strip(),
-                            'motif_gel':        motif,
-                            'reference_legale': ref,
-                            'date_designation': date_desig,
-                            'regime':           regime,
+                            'id_registre':    str(m.get('id', '')),
+                            'regime':         regime,
+                            'nom':            nom,
+                            'prenom':         premier,
+                            'prenom_complet': prenom,
+                            'alias':          [a for a in alias if a],
+                            'titre':          titre,
+                            'date_naissance': date,
+                            'lieu_naissance': lieu_naiss,
+                            'nationalite':    [nat] if nat else [],
+                            'passeport':      passeport,
+                            'identification': [],
+                            'adresse':        adresse,
+                            'fondement_jur':  fondement_jur,
+                            'motifs':         motifs,
                         })
                         count += 1
 
@@ -824,24 +925,34 @@ class ScreeningEngine:
         alert = "NONE"
         match_name = ""
 
-        # Construire les détails enrichis du match GDA
+        # Construire les détails enrichis du match GDA — colonnes exactes du registre
         gda_details = None
         if best_match and best_score >= SEUIL_REVIEW:
             prenom_display = best_match.get('prenom_complet', best_match.get('prenom', ''))
             match_name = f"{prenom_display} {best_match.get('nom', '')}".strip()
 
-            # Construire l'objet de détails
             gda_details = {
-                "nom_complet":      match_name,
-                "date_naissance":   best_match.get('date_naissance', ''),
-                "lieu_naissance":   best_match.get('lieu_naissance', ''),
-                "nationalite":      best_match.get('nationalite', []),
-                "alias":            best_match.get('alias', []),
-                "motif_gel":        best_match.get('motif_gel', ''),
-                "reference_legale": best_match.get('reference_legale', ''),
-                "date_designation": best_match.get('date_designation', ''),
-                "regime":           best_match.get('regime', ''),
-                "source":           self.source or "Inconnue",
+                # ── Identité ────────────────────────────────────────────────
+                "id_registre":    best_match.get('id_registre', ''),
+                "regime":         best_match.get('regime', ''),
+                "nom_complet":    match_name,
+                "alias":          best_match.get('alias', []),
+                "titre":          best_match.get('titre', ''),
+                # ── Naissance ───────────────────────────────────────────────
+                "date_naissance": best_match.get('date_naissance', ''),
+                "lieu_naissance": best_match.get('lieu_naissance', ''),
+                # ── Nationalité ─────────────────────────────────────────────
+                "nationalite":    best_match.get('nationalite', []),
+                # ── Documents d'identité ────────────────────────────────────
+                "passeport":      best_match.get('passeport', []),
+                "identification": best_match.get('identification', []),
+                # ── Localisation ────────────────────────────────────────────
+                "adresse":        best_match.get('adresse', []),
+                # ── Sanctions ───────────────────────────────────────────────
+                "fondement_jur":  best_match.get('fondement_jur', ''),   # Fondement juridique
+                "motifs":         best_match.get('motifs', ''),           # Motifs
+                # ── Méta ────────────────────────────────────────────────────
+                "source":         self.source or "Inconnue",
                 "champs_correspondants": matched_fields,
             }
 
