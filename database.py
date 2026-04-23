@@ -5,6 +5,8 @@ Module Database - Gestion de la base de données SQLite
 """
 
 import sqlite3
+import csv
+import io
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import json
@@ -85,6 +87,141 @@ class Database:
             )
         """)
 
+        # Table search_history — historique de toutes les recherches (validées ou non)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS search_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                first_name TEXT NOT NULL,
+                last_name TEXT NOT NULL,
+                birth_date TEXT,
+                nationality TEXT,
+                profession TEXT,
+                gda_decision TEXT,
+                gda_score INTEGER,
+                gda_match_name TEXT,
+                gda_fondement TEXT,
+                gda_motifs TEXT,
+                ppe_detected INTEGER DEFAULT 0,
+                ppe_keywords TEXT,
+                nationality_risk_level TEXT,
+                nationality_risk_label TEXT,
+                nationality_risk_source TEXT,
+                final_decision TEXT NOT NULL,
+                decision_reason TEXT,
+                outcome TEXT NOT NULL,
+                operator_note TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    # ── Historique des recherches ─────────────────────────────────────────────
+
+    def log_search(self, search_data: Dict[str, Any]) -> int:
+        """
+        Enregistre une recherche dans l'historique.
+        outcome : 'BLOQUE' | 'REVIEW' | 'VALIDE' | 'ABANDONNE'
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        nat_risk = search_data.get("nationality_risk") or {}
+        gda_details = search_data.get("gda_details") or {}
+
+        cursor.execute("""
+            INSERT INTO search_history (
+                first_name, last_name, birth_date, nationality, profession,
+                gda_decision, gda_score, gda_match_name, gda_fondement, gda_motifs,
+                ppe_detected, ppe_keywords,
+                nationality_risk_level, nationality_risk_label, nationality_risk_source,
+                final_decision, decision_reason, outcome, operator_note
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            search_data.get("first_name", ""),
+            search_data.get("last_name", ""),
+            search_data.get("birth_date", ""),
+            search_data.get("nationality", ""),
+            search_data.get("profession", ""),
+            search_data.get("gda_decision", ""),
+            search_data.get("gda_score", 0),
+            gda_details.get("nom_complet", ""),
+            gda_details.get("fondement_jur", ""),
+            gda_details.get("motifs", ""),
+            1 if search_data.get("ppe_detected") else 0,
+            ", ".join(search_data.get("ppe_keywords", [])),
+            nat_risk.get("risk_level", ""),
+            nat_risk.get("label", ""),
+            nat_risk.get("source", ""),
+            search_data.get("final_decision", ""),
+            search_data.get("decision_reason", ""),
+            search_data.get("outcome", ""),
+            search_data.get("operator_note", ""),
+        ))
+
+        search_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return search_id
+
+    def get_search_history(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Récupère l'historique des recherches, plus récentes en premier."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM search_history
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def export_search_history_csv(self) -> str:
+        """Exporte tout l'historique en CSV (retourne une chaîne UTF-8)."""
+        rows = self.get_search_history(limit=10000)
+        if not rows:
+            return ""
+
+        output = io.StringIO()
+        writer = csv.DictWriter(
+            output,
+            fieldnames=[
+                "id", "created_at",
+                "first_name", "last_name", "birth_date", "nationality", "profession",
+                "gda_decision", "gda_score", "gda_match_name", "gda_fondement", "gda_motifs",
+                "ppe_detected", "ppe_keywords",
+                "nationality_risk_level", "nationality_risk_label", "nationality_risk_source",
+                "final_decision", "decision_reason", "outcome", "operator_note",
+            ],
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+        return output.getvalue()
+
+    def update_search(self, search_id: int, updates: Dict[str, Any]):
+        """
+        Met à jour un enregistrement d'historique existant (étapes PPE, outcome final).
+        Seules les clés présentes dans updates sont modifiées.
+        """
+        if not search_id or not updates:
+            return
+
+        allowed = {
+            "profession", "ppe_detected", "ppe_keywords",
+            "final_decision", "decision_reason", "outcome", "operator_note",
+        }
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [search_id]
+        cursor.execute(f"UPDATE search_history SET {set_clause} WHERE id = ?", values)
         conn.commit()
         conn.close()
 
