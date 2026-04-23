@@ -991,14 +991,11 @@ def render_history():
         if profession:
             identity_parts.append(f"Profession : {profession}")
         identity_str = "  •  ".join(identity_parts) if identity_parts else ""
-
-        # Pré-calculer les lignes HTML conditionnelles
         identity_line = f"<div style='font-size:0.8rem;color:#94a3b8;margin-top:0.15rem;'>{identity_str}</div>" if identity_str else ""
-        reason_line   = f"<div style='font-size:0.82rem;color:#374151;margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid rgba(0,0,0,0.06);'>{reason}</div>"
 
         st.markdown(f"""
         <div style="background:{color};border-left:4px solid {border};border-radius:8px;
-                    padding:0.85rem 1.1rem;margin-bottom:0.6rem;">
+                    padding:0.85rem 1.1rem;margin-bottom:0.1rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem;">
                 <strong style="font-size:1rem;">{prenom} {nom}</strong>
                 <span style="font-size:0.8rem;font-weight:700;color:{text_color};
@@ -1007,9 +1004,10 @@ def render_history():
             </div>
             <div style="font-size:0.8rem;color:#64748b;">{details_str}</div>
             {identity_line}
-            {reason_line}
         </div>
         """, unsafe_allow_html=True)
+        st.caption(reason)
+        st.markdown("<div style='margin-bottom:0.5rem;'></div>", unsafe_allow_html=True)
 
 
 def render_clients():
