@@ -500,6 +500,34 @@ def render_subscription_form():
             if detection_bloquante:
                 st.caption("⚠️ _Impossible de continuer : correspondance GDA détectée — contact référent obligatoire_")
 
+                # ── Log du blocage live au moment où les deux champs sont complets ──
+                # Le bouton étant désactivé, on log ici avec un flag anti-doublon
+                if first_name and last_name and matched_person_details is not None:
+                    live_key = f"live_logged_{first_name.strip().lower()}_{last_name.strip().lower()}"
+                    if not st.session_state.get(live_key):
+                        st.session_state[live_key] = True
+                        sid = st.session_state.db.log_search({
+                            "first_name":      first_name,
+                            "last_name":       last_name,
+                            "birth_date":      birth_date.isoformat() if birth_date else "",
+                            "nationality":     nationality or "",
+                            "profession":      "",
+                            "gda_decision":    "BLOCK",
+                            "gda_score":       score,
+                            "gda_details":     {
+                                "nom_complet":   matched_name,
+                                "fondement_jur": matched_person_details.get('fondement_jur', ''),
+                                "motifs":        matched_person_details.get('motifs', ''),
+                            },
+                            "ppe_detected":    False,
+                            "ppe_keywords":    [],
+                            "nationality_risk": None,
+                            "final_decision":  "BLOCK",
+                            "decision_reason": f"Correspondance GDA : {matched_name} (score {score}/100)",
+                            "outcome":         "BLOQUE",
+                        })
+                        st.session_state.current_search_id = sid
+
             if button_clicked and not detection_bloquante:
                 if first_name and last_name:
                     client_data = {
