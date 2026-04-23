@@ -41,7 +41,9 @@ if 'form_data' not in st.session_state:
 if 'api_last_update' not in st.session_state:
     st.session_state.api_last_update = None
 if 'nationality_alert' not in st.session_state:
-    st.session_state.nationality_alert = None  # Alerte nationalité persistante (non bloquante)
+    st.session_state.nationality_alert = None
+if 'current_search_id' not in st.session_state:
+    st.session_state.current_search_id = None  # ID de la recherche en cours dans l'historique
 
 # CSS
 st.markdown("""
@@ -515,6 +517,33 @@ def render_subscription_form():
                     else:
                         st.session_state.nationality_alert = None
 
+                    # ── Enregistrement dans l'historique ─────────────────────
+                    decision = result["decision"]
+                    if decision == "BLOCK":
+                        outcome = "BLOQUE"
+                    elif decision == "REVIEW":
+                        outcome = "REVIEW"
+                    else:
+                        outcome = "EN_COURS"  # Pas encore terminé — continue vers PPE
+
+                    search_id = st.session_state.db.log_search({
+                        "first_name":      first_name,
+                        "last_name":       last_name,
+                        "birth_date":      birth_date.isoformat() if birth_date else "",
+                        "nationality":     nationality or "",
+                        "profession":      "",
+                        "gda_decision":    decision,
+                        "gda_score":       result.get("gda_score", 0),
+                        "gda_details":     result.get("gda_details"),
+                        "ppe_detected":    False,
+                        "ppe_keywords":    [],
+                        "nationality_risk": result.get("nationality_risk"),
+                        "final_decision":  decision,
+                        "decision_reason": result.get("decision_reason", ""),
+                        "outcome":         outcome,
+                    })
+                    st.session_state.current_search_id = search_id
+
                     if result["decision"] == "BLOCK":
                         gda_details = result.get("gda_details")
                         st.markdown(f"""
@@ -589,6 +618,15 @@ def render_subscription_form():
                     if result["decision"] == "REVIEW" and result["alert_type"] == "PPE":
                         kws = ', '.join(result.get('ppe_keywords', [])) or 'N/A'
                         ppe_score = result.get('ppe_score', 0)
+                        # Mise à jour historique — PPE détecté à l'étape profession
+                        st.session_state.db.update_search(st.session_state.current_search_id, {
+                            "profession":      profession,
+                            "ppe_detected":    True,
+                            "ppe_keywords":    ', '.join(result.get('ppe_keywords', [])),
+                            "final_decision":  "REVIEW",
+                            "decision_reason": result['decision_reason'],
+                            "outcome":         "REVIEW_PPE",
+                        })
                         st.markdown(f"""
                         <div class="alert alert-warning">
                             <strong>⚠️ ALERTE PPE — Fonction à risque détectée</strong><br>
@@ -605,6 +643,12 @@ def render_subscription_form():
                         st.rerun()
 
                     else:
+                        # Mise à jour historique — profession OK, on continue
+                        st.session_state.db.update_search(st.session_state.current_search_id, {
+                            "profession":   profession,
+                            "ppe_detected": False,
+                            "outcome":      "EN_COURS",
+                        })
                         st.session_state.form_data["profession"] = profession
                         st.session_state.step = 3
                         st.rerun()
@@ -697,8 +741,19 @@ def render_subscription_form():
                     if q3: ppe_flags.append("Proche parent PPE")
                     if q4: ppe_flags.append("Associé proche d'une PPE")
 
-                    line_kws    = f"<strong>Fonctions à risque :</strong> {kws}<br>" if kws and kws != "N/A" else ""
-                    line_flags  = f"<strong>Déclarations PPE :</strong> {' | '.join(ppe_flags)}<br>" if ppe_flags else ""
+                    # Mise à jour historique — bloqué en review PPE questions
+                    declared = ", ".join(ppe_flags)
+                    all_kws = list(filter(None, [kws if kws != "N/A" else "", declared]))
+                    st.session_state.db.update_search(st.session_state.current_search_id, {
+                        "ppe_detected":    True,
+                        "ppe_keywords":    " | ".join(all_kws),
+                        "final_decision":  "REVIEW",
+                        "decision_reason": result['decision_reason'],
+                        "outcome":         "REVIEW_PPE_QUESTIONS",
+                    })
+
+                    line_kws   = f"<strong>Fonctions à risque :</strong> {kws}<br>" if kws and kws != "N/A" else ""
+                    line_flags = f"<strong>Déclarations PPE :</strong> {' | '.join(ppe_flags)}<br>" if ppe_flags else ""
 
                     st.markdown(f"""
                     <div class="alert alert-warning">
@@ -709,6 +764,19 @@ def render_subscription_form():
                     </div>
                     """, unsafe_allow_html=True)
                 else:
+                    # Mise à jour historique — toutes les étapes OK, souscription autorisée
+                    ppe_flags = []
+                    if q1: ppe_flags.append("PPE actuelle")
+                    if q2: ppe_flags.append("PPE cessée < 1 an")
+                    if q3: ppe_flags.append("Proche parent PPE")
+                    if q4: ppe_flags.append("Associé proche d'une PPE")
+                    st.session_state.db.update_search(st.session_state.current_search_id, {
+                        "ppe_detected":    any([q1, q2, q3, q4]),
+                        "ppe_keywords":    ", ".join(ppe_flags) if ppe_flags else "",
+                        "final_decision":  "OK",
+                        "decision_reason": "GDA ✓ • PPE ✓ • Questions PPE ✓",
+                        "outcome":         "VALIDE",
+                    })
                     st.session_state.form_data["ppe_answers"] = ppe_answers
                     st.session_state.step = 4
                     time.sleep(0.3)
@@ -815,6 +883,67 @@ def render_subscription_form():
                 else:
                     st.error("⚠️ Veuillez remplir tous les champs obligatoires")
 
+def render_history():
+    """Page historique des recherches avec export CSV."""
+    st.markdown("## 🕓 Historique des recherches")
+
+    rows = st.session_state.db.get_search_history(limit=500)
+
+    if not rows:
+        st.info("Aucune recherche enregistrée pour l'instant.")
+        return
+
+    # ── Export CSV ────────────────────────────────────────────────────────────
+    csv_data = st.session_state.db.export_search_history_csv()
+    st.download_button(
+        label="⬇️ Exporter en CSV",
+        data=csv_data.encode("utf-8-sig"),   # utf-8-sig pour Excel
+        file_name=f"historique_screening_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+    )
+
+    st.markdown(f"**{len(rows)} recherche(s) enregistrée(s)**")
+    st.markdown("---")
+
+    # ── Tableau ───────────────────────────────────────────────────────────────
+    for row in rows:
+        outcome = row.get("outcome", "")
+        if outcome == "BLOQUE":
+            badge = "🔴 BLOQUÉ"
+            color = "#fef2f2"
+            border = "#ef4444"
+        elif outcome == "REVIEW":
+            badge = "🟠 REVIEW"
+            color = "#fffbeb"
+            border = "#f59e0b"
+        else:
+            badge = "🟢 VALIDÉ"
+            color = "#f0fdf4"
+            border = "#10b981"
+
+        nat_risk = row.get("nationality_risk_label", "")
+        nat_badge = f" • ⚠️ {nat_risk}" if nat_risk else ""
+        ppe = " • PPE détecté" if row.get("ppe_detected") else ""
+        gda_match = f" • GDA : {row.get('gda_match_name', '')}" if row.get('gda_match_name') else ""
+
+        st.markdown(f"""
+        <div style="background:{color};border-left:4px solid {border};border-radius:8px;
+                    padding:0.75rem 1rem;margin-bottom:0.5rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <strong>{row.get('first_name','')} {row.get('last_name','')}</strong>
+                <span style="font-size:0.85rem;font-weight:700;">{badge}</span>
+            </div>
+            <div style="font-size:0.82rem;color:#64748b;margin-top:0.25rem;">
+                📅 {row.get('created_at','')[:16].replace('T',' ')}
+                {gda_match}{nat_badge}{ppe}
+            </div>
+            <div style="font-size:0.82rem;margin-top:0.2rem;">
+                {row.get('decision_reason','') or '—'}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 def render_clients():
     """Clients"""
     st.markdown("## 👥 Clients")
@@ -848,7 +977,7 @@ def main():
 
     with st.sidebar:
         st.markdown("### NAVIGATION")
-        page = st.radio("Choisir une page", ["Souscrire", "Clients", "Statistiques"], label_visibility="collapsed")
+        page = st.radio("Choisir une page", ["Souscrire", "Clients", "Historique", "Statistiques"], label_visibility="collapsed")
 
         st.markdown("---")
 
@@ -955,6 +1084,8 @@ def main():
         render_subscription_form()
     elif page == "Clients":
         render_clients()
+    elif page == "Historique":
+        render_history()
 
 if __name__ == "__main__":
     main()
