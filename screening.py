@@ -992,6 +992,10 @@ def render_history():
             identity_parts.append(f"Profession : {profession}")
         identity_str = "  •  ".join(identity_parts) if identity_parts else ""
 
+        # Pré-calculer les lignes HTML conditionnelles
+        identity_line = f"<div style='font-size:0.8rem;color:#94a3b8;margin-top:0.15rem;'>{identity_str}</div>" if identity_str else ""
+        reason_line   = f"<div style='font-size:0.82rem;color:#374151;margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid rgba(0,0,0,0.06);'>{reason}</div>"
+
         st.markdown(f"""
         <div style="background:{color};border-left:4px solid {border};border-radius:8px;
                     padding:0.85rem 1.1rem;margin-bottom:0.6rem;">
@@ -1002,9 +1006,8 @@ def render_history():
                              border:1px solid {border};">{badge}</span>
             </div>
             <div style="font-size:0.8rem;color:#64748b;">{details_str}</div>
-            {"<div style='font-size:0.8rem;color:#94a3b8;margin-top:0.15rem;'>" + identity_str + "</div>" if identity_str else ""}
-            <div style="font-size:0.82rem;color:#374151;margin-top:0.35rem;
-                        padding-top:0.35rem;border-top:1px solid rgba(0,0,0,0.06);">{reason}</div>
+            {identity_line}
+            {reason_line}
         </div>
         """, unsafe_allow_html=True)
 
